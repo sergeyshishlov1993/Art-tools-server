@@ -16,11 +16,11 @@ Backend API сервер для інтернет-магазину інструм
 
 ART-TOOLS_server/
 ├── src/
-│   ├── index.js              # Точка входу
-│   ├── db.js                 # Підключення до БД + моделі
+│   ├── index.js              
+│   ├── db.js                 
 │   ├── config/
-│   │   └── database.js       # Конфігурація БД
-│   ├── models/               # Sequelize моделі
+│   │   └── database.js       
+│   ├── models/               
 │   │   ├── Products.js
 │   │   ├── Category.js
 │   │   ├── SubCategory.js
@@ -36,7 +36,7 @@ ART-TOOLS_server/
 │   │   ├── SliderImg.js
 │   │   └── Admin.js
 │   ├── routes/
-│   │   ├── admin/            # Адмін API (захищені)
+│   │   ├── admin/            
 │   │   │   ├── index.js
 │   │   │   ├── auth.js
 │   │   │   ├── products.js
@@ -44,24 +44,24 @@ ART-TOOLS_server/
 │   │   │   ├── filters.js
 │   │   │   ├── reviews.js
 │   │   │   └── import.js
-│   │   └── public/           # Публічні API
+│   │   └── public/           
 │   │       ├── index.js
 │   │       ├── products.js
 │   │       ├── orders.js
 │   │       ├── feedback.js
 │   │       └── slider.js
-│   ├── services/             # Бізнес-логіка
+│   ├── services/             
 │   │   ├── importService.js
 │   │   ├── productService.js
 │   │   ├── filterService.js
 │   │   ├── autoMappingService.js
 │   │   └── cleanupService.js
 │   └── middleware/
-│       └── auth.js           # JWT middleware
-├── migrations/               # Sequelize міграції
-├── seeders/                  # Сіди для БД
-├── file/                     # Завантажені файли
-├── .env                      # Змінні оточення
+│       └── auth.js           
+├── migrations/               
+├── seeders/                 
+├── file/                     
+├── .env                      
 ├── package.json
 └── docker-compose.yml
 
