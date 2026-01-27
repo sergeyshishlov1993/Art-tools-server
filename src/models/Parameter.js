@@ -26,13 +26,18 @@ module.exports = function (sequelize) {
         parameter_value: {
             type: Sequelize.STRING(255),
             allowNull: true,
+        },
+        param_value_slug: {
+            type: Sequelize.STRING(255),
+            allowNull: true,
         }
     }, {
         tableName: "parameter",
         timestamps: true,
         indexes: [
             { fields: ['product_id'] },
-            { fields: ['slug'] }
+            { fields: ['slug'] },
+            { fields: ['param_value_slug'] }
         ]
     });
 };
