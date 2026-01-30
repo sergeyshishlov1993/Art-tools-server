@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const router = Router();
-const { Review, ReviewResponse } = require('../../db');
+const { Review, ReviewResponse, Product } = require('../../db');
 
 // GET /admin/reviews
 router.get('/', async (req, res) => {
@@ -9,7 +9,14 @@ router.get('/', async (req, res) => {
 
         const data = await Review.findAndCountAll({
             distinct: true,
-            include: [{ model: ReviewResponse, as: 'responses' }],
+            include: [
+                { model: ReviewResponse, as: 'responses' },
+                {
+                    model: Product,
+                    as: 'product',
+                    attributes: ['product_id', 'product_name', 'slug', 'price', 'main_image']
+                }
+            ],
             offset: (page - 1) * limit,
             limit: parseInt(limit),
             order: [['createdAt', 'DESC']]
@@ -32,6 +39,15 @@ router.get('/responses', async (req, res) => {
 
         const data = await ReviewResponse.findAndCountAll({
             distinct: true,
+            include: [{
+                model: Review,
+                as: 'review',
+                include: [{
+                    model: Product,
+                    as: 'product',
+                    attributes: ['product_id', 'product_name', 'slug', 'main_image']
+                }]
+            }],
             offset: (page - 1) * limit,
             limit: parseInt(limit),
             order: [['createdAt', 'DESC']]
@@ -52,7 +68,14 @@ router.get('/product/:productId', async (req, res) => {
     try {
         const reviews = await Review.findAll({
             where: { product_id: req.params.productId },
-            include: [{ model: ReviewResponse, as: 'responses' }]
+            include: [
+                { model: ReviewResponse, as: 'responses' },
+                {
+                    model: Product,
+                    as: 'product',
+                    attributes: ['product_id', 'product_name', 'slug', 'price', 'main_image']
+                }
+            ]
         });
 
         res.json({ reviews });

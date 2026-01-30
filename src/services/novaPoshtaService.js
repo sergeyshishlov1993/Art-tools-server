@@ -4,9 +4,6 @@ const API_KEY = process.env.NOVA_POSHTA_API_KEY || 'e9c3b2475b54bc1d3033f11ad5b2
 const BASE_URL = 'https://api.novaposhta.ua/v2.0/json/';
 
 class NovaPoshtaService {
-    /**
-     * Отримати всі міста
-     */
     static async getCities() {
         try {
             const response = await axios.post(BASE_URL, {
@@ -21,9 +18,6 @@ class NovaPoshtaService {
         }
     }
 
-    /**
-     * Пошук міст
-     */
     static async searchCities(query) {
         try {
             const response = await axios.post(BASE_URL, {
@@ -42,9 +36,6 @@ class NovaPoshtaService {
         }
     }
 
-    /**
-     * Отримати відділення
-     */
     static async getWarehouses(cityRef, searchQuery = '', type = '') {
         try {
             const response = await axios.post(BASE_URL, {
@@ -66,9 +57,6 @@ class NovaPoshtaService {
         }
     }
 
-    /**
-     * Отримати відділення по назві міста
-     */
     static async getWarehousesByCityName(cityName, searchQuery = '') {
         try {
             const response = await axios.post(BASE_URL, {

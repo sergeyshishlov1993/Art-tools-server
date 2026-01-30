@@ -9,15 +9,57 @@ const KEY_MAP = {
 };
 
 const BLACKLIST = [
-    "Інструкція", "Рівень звукового", "Рівень вібрації", "Клас безпеки",
-    "Клас захисту", "Рівень захисту", "Вага", "Біта", "Додаткова рукоять",
-    "Зарядний пристрій", "Кейс", "Гарантія", "Діаметр свердління", "Розміри"
+    "Інструкція", "Инструкция",
+    "Рівень звукового", "Уровень звукового",
+    "Рівень вібрації", "Уровень вибрации",
+    "Клас безпеки", "Класс безопасности",
+    "Клас захисту", "Класс защиты",
+    "Рівень захисту", "Уровень защиты",
+    "Вага", "Вес",
+    "Біта", "Бита",
+    "Додаткова рукоять", "Дополнительная рукоятка",
+    "Зарядний пристрій", "Зарядное устройство",
+    "Кейс",
+    "Гарантія", "Гарантия", "Гарантия",
+    "Діаметр свердління", "Диаметр сверления",
+    "Розміри", "Размеры"
 ];
 
+function normalizeParameterName(parameterName) {
+    const trimmedName = String(parameterName || '').trim();
+    if (!trimmedName) return '';
+    return KEY_MAP[trimmedName] || trimmedName;
+}
+
+function isBlacklistedParameterName(parameterName) {
+    const name = String(parameterName || '');
+    return BLACKLIST.some(bad => name.includes(bad));
+}
+
+function normalizeParameterValue(parameterValue) {
+    let value = String(parameterValue || '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/(\d)[\s\u00A0](?=\d{3}(\D|$))/g, '$1')
+        .replace(/\s*[-–—]\s*/g, ' - ')
+        .replace(/(\d)\s+(Аг|В|Вт|Нм|мм)/gi, '$1$2')
+        .replace(/(\d),(\d)/g, '$1.$2')
+        .trim();
+
+    if (value.endsWith('.')) value = value.slice(0, -1).trim();
+    return value;
+}
+
+function pickBetterDisplayValue(currentValue, nextValue) {
+    const current = String(currentValue || '').trim();
+    const next = String(nextValue || '').trim();
+    if (!current) return next;
+    if (!next) return current;
+    if (next.length < current.length) return next;
+    return current;
+}
+
 class FilterService {
-    /**
-     * Перерахувати фільтри для підкатегорії
-     */
     static async recalcForCategory(subCategoryId) {
         try {
             const [brands] = await Product.sequelize.query(
@@ -78,54 +120,56 @@ class FilterService {
         }
     }
 
-    /**
-     * Групувати параметри
-     */
     static _groupParams(params) {
         const groupedParams = {};
 
-        params.forEach(row => {
-            let name = row.parameter_name.trim();
+        for (const row of params) {
+            const rawName = row.parameter_name;
+            if (isBlacklistedParameterName(rawName)) continue;
 
-            if (BLACKLIST.some(bad => name.includes(bad))) return;
-            if (KEY_MAP[name]) name = KEY_MAP[name];
+            const name = normalizeParameterName(rawName);
+            const slug = generateFilterSlug(name);
+            if (!slug) continue;
 
-            const slug = row.slug || generateFilterSlug(name);
-            let value = row.parameter_value
-                .replace(/\s+/g, ' ')
-                .replace(/\s*[-–—]\s*/g, ' - ')
-                .replace(/(\d)\s+(Аг|В|Вт|Нм|мм)/gi, '$1$2')
-                .replace(/(\d),(\d)/g, '$1.$2')
-                .trim();
+            const value = normalizeParameterValue(row.parameter_value);
+            if (!value) continue;
 
-            if (value.endsWith('.')) value = value.slice(0, -1);
-            if (!slug || !value) return;
-
-            // Генеруємо value_slug
             const valueSlug = row.param_value_slug || generateFilterSlug(value);
+            if (!valueSlug) continue;
 
             if (!groupedParams[slug]) {
                 groupedParams[slug] = {
                     title: name,
                     slug: slug,
-                    options: []
+                    options: [],
+                    _optionsBySlug: new Map()
                 };
             }
 
-            const existingOpt = groupedParams[slug].options.find(
-                o => o.value.toLowerCase() === value.toLowerCase()
-            );
+            const group = groupedParams[slug];
+            const existing = group._optionsBySlug.get(valueSlug);
 
-            if (existingOpt) {
-                existingOpt.count += parseInt(row.count);
-            } else if (groupedParams[slug].options.length < 15) {
-                groupedParams[slug].options.push({
-                    value: value,
-                    value_slug: valueSlug,  // <-- ДОДАНО!
-                    count: parseInt(row.count)
-                });
+            if (existing) {
+                existing.count += parseInt(row.count, 10);
+                existing.value = pickBetterDisplayValue(existing.value, value);
+                continue;
             }
-        });
+
+            if (group.options.length >= 15) continue;
+
+            const option = {
+                value: value,
+                value_slug: valueSlug,
+                count: parseInt(row.count, 10)
+            };
+
+            group.options.push(option);
+            group._optionsBySlug.set(valueSlug, option);
+        }
+
+        for (const key of Object.keys(groupedParams)) {
+            delete groupedParams[key]._optionsBySlug;
+        }
 
         return groupedParams;
     }

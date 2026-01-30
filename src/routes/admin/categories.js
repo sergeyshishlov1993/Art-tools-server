@@ -10,8 +10,6 @@ const slugify = (text) => text.toString().toLowerCase()
     .replace(/^-+/, '')
     .replace(/-+$/, '');
 
-// === OVERVIEW ===
-
 // GET /admin/categories/overview
 router.get('/overview', async (req, res) => {
     try {
@@ -141,8 +139,6 @@ router.get('/sub-category', async (req, res) => {
     }
 });
 
-// === UNMAPPED - категорії постачальників без маппінгу ===
-
 // GET /admin/categories/unmapped
 // GET /admin/categories/unmapped
 router.get('/unmapped', async (req, res) => {
@@ -158,7 +154,6 @@ router.get('/unmapped', async (req, res) => {
             raw: true
         });
 
-        // Рахуємо товари в кожній
         const result = [];
         for (const subCat of supplierSubCats) {
             const productCount = await Product.count({
@@ -174,10 +169,8 @@ router.get('/unmapped', async (req, res) => {
             }
         }
 
-        // Сортуємо по кількості товарів
         result.sort((a, b) => b.product_count - a.product_count);
 
-        // Отримуємо мої категорії для вибору (простий запит без include)
         const [mySubCategories] = await Product.sequelize.query(`
             SELECT 
                 sc.sub_category_id as id,
@@ -204,7 +197,7 @@ router.get('/unmapped', async (req, res) => {
 });
 
 
-// POST /admin/categories/map - замапити категорію постачальника на твою
+// POST /admin/categories/map
 router.post('/map', async (req, res) => {
     try {
         const { from_sub_category_id, to_sub_category_id } = req.body;
@@ -215,13 +208,11 @@ router.post('/map', async (req, res) => {
             });
         }
 
-        // Перевіряємо чи існує цільова категорія
         const targetCat = await SubCategory.findByPk(to_sub_category_id);
         if (!targetCat) {
             return res.status(404).json({ error: 'Target category not found' });
         }
 
-        // Переміщуємо товари
         const [updatedCount] = await Product.update(
             {
                 sub_category_id: to_sub_category_id,
@@ -230,13 +221,11 @@ router.post('/map', async (req, res) => {
             { where: { sub_category_id: from_sub_category_id } }
         );
 
-        // Видаляємо пусту категорію постачальника
         if (updatedCount > 0) {
             await SubCategory.destroy({
                 where: { sub_category_id: from_sub_category_id }
             });
 
-            // Перевіряємо чи є ще підкатегорії в батьківській, якщо ні - видаляємо
             const parentMatch = from_sub_category_id.match(/^([A-Z]+)_/);
             if (parentMatch) {
                 const prefix = parentMatch[1];
@@ -254,7 +243,6 @@ router.post('/map', async (req, res) => {
             }
         }
 
-        // Перераховуємо фільтри
         const FilterService = require('../../services/filterService');
         await FilterService.recalcForCategory(to_sub_category_id);
 
@@ -271,8 +259,6 @@ router.post('/map', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
-// === MANUAL CRUD ===
 
 // POST /admin/categories/category
 router.post('/category', async (req, res) => {

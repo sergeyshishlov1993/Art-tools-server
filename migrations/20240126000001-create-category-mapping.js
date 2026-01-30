@@ -1,4 +1,3 @@
-
 "use strict";
 
 module.exports = {
@@ -14,12 +13,20 @@ module.exports = {
                 allowNull: false,
             },
             external_category_id: {
-                type: Sequelize.STRING,
+                type: Sequelize.STRING(100),
                 allowNull: false,
             },
+            external_category_name: {
+                type: Sequelize.STRING(255),
+                allowNull: true,
+            },
+            parent_category_name: {
+                type: Sequelize.STRING(255),
+                allowNull: true,
+            },
             internal_sub_category_id: {
-                type: Sequelize.STRING,
-                allowNull: false,
+                type: Sequelize.STRING(100),
+                allowNull: true,  // null = незамаплена
             },
             createdAt: {
                 type: Sequelize.DATE,
@@ -36,6 +43,9 @@ module.exports = {
             type: "unique",
             name: "category_mappings_unique_supplier_external",
         });
+
+        await queryInterface.addIndex("category_mappings", ["supplier_prefix"]);
+        await queryInterface.addIndex("category_mappings", ["internal_sub_category_id"]);
     },
 
     async down(queryInterface) {

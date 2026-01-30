@@ -1,76 +1,95 @@
-const { Router } = require('express');
+const express = require('express');
+const router = express.Router();
 const { Op, Sequelize } = require('sequelize');
-const router = Router();
-const {
-    Product, Picture, Parameter, Review, ReviewResponse
-} = require('../../db');
-const { generateSlug } = require('../../utils/slugify');
+const { Product, Picture, Parameter, SubCategory, Category } = require('../../db');
+const cache = require('../../utils/cache');
 
-// GET /admin/products - список з фільтрами
+const LIST_ATTRS = [
+    'product_id', 'slug', 'product_name', 'brand',
+    'price', 'sale_price', 'discount', 'available',
+    'bestseller', 'sale', 'sub_category_id', 'custom_product',
+    'createdAt', 'updatedAt'
+];
+
+// GET /admin/products
 router.get('/', async (req, res) => {
     try {
-        const {
-            page = 1, limit = 20, search = '', sub_category,
-            price_min, price_max, brands, special, attributes
-        } = req.query;
-
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const offset = (page - 1) * limit;
-        const where = { available: 'true' };
 
-        if (sub_category && sub_category !== 'undefined') {
+        const { search, sub_category, category, brand, sale, bestseller, available, sort, price_min, price_max } = req.query;
+        const where = {};
+
+        if (search) {
+            where[Op.or] = [
+                { product_name: { [Op.iLike]: `%${search}%` } },
+                { product_id: { [Op.iLike]: `%${search}%` } },
+                { brand: { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+
+        if (sub_category) {
             where.sub_category_id = sub_category;
-        }
-        if (search.trim()) {
-            where.product_name = { [Op.iLike]: `%${search.trim()}%` };
-        }
-        if (price_min || price_max) {
-            where.price = {};
-            if (price_min) where.price[Op.gte] = +price_min;
-            if (price_max) where.price[Op.lte] = +price_max;
-        }
-        if (brands) {
-            const list = Array.isArray(brands) ? brands : [brands];
-            if (list.length) where.brand = { [Op.in]: list };
-        }
-        if (special) {
-            const list = Array.isArray(special) ? special : [special];
-            if (list.includes('sale')) where.sale = 'true';
-            if (list.includes('bestseller')) where.bestseller = 'true';
-            if (list.includes('discount')) where.discount = { [Op.gt]: 0 };
-        }
-        if (attributes) {
-            try {
-                const attrs = JSON.parse(attributes);
-                for (const [slugKey, values] of Object.entries(attrs)) {
-                    if (values?.length > 0) {
-                        where[Op.and] = (where[Op.and] || []).concat(
-                            Sequelize.literal(`
-                                EXISTS (
-                                    SELECT 1 FROM parameter p 
-                                    WHERE p.product_id = "Product".product_id 
-                                    AND p.slug = '${slugKey}' 
-                                    AND p.parameter_value IN (${values.map(v => `'${v}'`).join(',')})
-                                )
-                            `)
-                        );
-                    }
-                }
-            } catch (e) {}
+        } else if (category) {
+            const subCats = await SubCategory.findAll({
+                where: { category_id: category },
+                attributes: ['sub_category_id']
+            });
+            where.sub_category_id = { [Op.in]: subCats.map(sc => sc.sub_category_id) };
         }
 
-        const products = await Product.findAndCountAll({
-            distinct: true,
+        if (brand) {
+            const brands = Array.isArray(brand) ? brand : brand.split(',');
+            where.brand = { [Op.in]: brands };
+        }
+
+        // Фільтр по ціні
+        if (price_min || price_max) {
+            where[Op.and] = where[Op.and] || [];
+            if (price_min) {
+                where[Op.and].push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) >= ${parseFloat(price_min)}`)
+                );
+            }
+            if (price_max) {
+                where[Op.and].push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) <= ${parseFloat(price_max)}`)
+                );
+            }
+        }
+
+        if (sale === 'true') where.sale = 'true';
+        if (bestseller === 'true') where.bestseller = 'true';
+        if (available === 'true') where.available = 'true';
+        if (available === 'false') where.available = 'false';
+
+        const sortMap = {
+            'price_asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+            'price_desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+            'name_asc': [['product_name', 'ASC']],
+            'newest': [['createdAt', 'DESC']]
+        };
+        const order = sortMap[sort] || [['createdAt', 'DESC']];
+
+        const { count, rows } = await Product.findAndCountAll({
             where,
-            include: [{ model: Picture, as: 'pictures', limit: 1 }],
+            attributes: LIST_ATTRS,
+            include: [{
+                model: Picture,
+                as: 'pictures',
+                attributes: ['pictures_name'],
+                limit: 1
+            }],
+            limit,
             offset,
-            limit: parseInt(limit),
-            order: [['price', 'ASC']]
+            order,
+            distinct: true
         });
 
         res.json({
-            products: products.rows,
-            total: products.count,
-            pages: Math.ceil(products.count / limit)
+            products: rows,
+            pagination: { page, limit, total: count, pages: Math.ceil(count / limit) }
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -80,119 +99,77 @@ router.get('/', async (req, res) => {
 // GET /admin/products/:id
 router.get('/:id', async (req, res) => {
     try {
+        const { id } = req.params;
+
         const product = await Product.findOne({
-            where: { product_id: req.params.id },
+            where: {
+                [Op.or]: [
+                    { product_id: id },
+                    { slug: id }
+                ]
+            },
             include: [
                 { model: Picture, as: 'pictures' },
                 { model: Parameter, as: 'params' },
                 {
-                    model: Review,
-                    as: 'reviews',
-                    include: [{ model: ReviewResponse, as: 'responses' }]
+                    model: SubCategory,
+                    as: 'subCategory',
+                    include: [{ model: Category, as: 'category' }]
                 }
             ]
         });
 
         if (!product) {
-            return res.status(404).json({ message: 'Not found' });
+            return res.status(404).json({ error: 'Product not found' });
         }
+
         res.json({ product });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// GET /admin/products/by-slug/:slug
-router.get('/by-slug/:slug', async (req, res) => {
+// POST /admin/products
+router.post('/', async (req, res) => {
     try {
-        const product = await Product.findOne({
-            where: { slug: req.params.slug },
-            include: [
-                { model: Picture, as: 'pictures' },
-                { model: Parameter, as: 'params' },
-                {
-                    model: Review,
-                    as: 'reviews',
-                    include: [{ model: ReviewResponse, as: 'responses' }]
-                }
-            ]
-        });
+        const data = req.body;
+
+        if (!data.product_id) {
+            data.product_id = `CUSTOM_${Date.now()}`;
+        }
+
+        if (!data.slug && data.product_name) {
+            data.slug = data.product_name
+                .toLowerCase()
+                .replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+                .replace(/^-|-$/g, '');
+        }
+
+        data.custom_product = true;
+        const product = await Product.create(data);
+        await cache.invalidateProducts();
+
+        res.status(201).json({ product, message: 'Created' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// PUT /admin/products/:id
+router.put('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const product = await Product.findByPk(id);
 
         if (!product) {
-            return res.status(404).json({ message: 'Not found' });
-        }
-        res.json({ success: true, product });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// POST /admin/products/add
-router.post('/add', async (req, res) => {
-    try {
-        const { id: product_id, product_name, pictures, parameters, ...data } = req.body;
-        const slug = generateSlug(product_name, product_id);
-
-        await Product.create({
-            product_id,
-            slug,
-            product_name,
-            sub_category_id: data.sub_category_id,
-            product_description: data.product_description,
-            price: data.price,
-            available: data.available,
-            custom_product: true,
-            brand: data.brand
-        });
-
-        if (pictures) {
-            const pics = (Array.isArray(pictures) ? pictures : [pictures])
-                .map(p => ({ product_id, pictures_name: p }));
-            await Picture.bulkCreate(pics);
+            return res.status(404).json({ error: 'Product not found' });
         }
 
-        if (parameters) {
-            const params = (Array.isArray(parameters) ? parameters : [parameters])
-                .map(p => ({ product_id, parameter_name: p.name, parameter_value: p.value }));
-            await Parameter.bulkCreate(params);
-        }
+        await product.update(req.body);
+        await cache.invalidateProducts();
+        await cache.del(`product:${product.slug}`);
 
-        res.json({ message: 'Created', product_id, slug });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// PUT /admin/products/update/:id
-router.put('/update/:id', async (req, res) => {
-    try {
-        const data = { ...req.body };
-        if (data.product_name) {
-            data.slug = generateSlug(data.product_name, req.params.id);
-        }
-
-        const [count] = await Product.update(data, {
-            where: { product_id: req.params.id }
-        });
-
-        count > 0
-            ? res.json({ message: 'Updated' })
-            : res.status(404).json({ message: 'Not found' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// PUT /admin/products/update-discount/:id
-router.put('/update-discount/:id', async (req, res) => {
-    try {
-        const [count] = await Product.update(req.body, {
-            where: { product_id: req.params.id }
-        });
-
-        count > 0
-            ? res.json({ message: 'Discount updated' })
-            : res.status(404).json({ message: 'Not found' });
+        res.json({ product, message: 'Updated' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -201,100 +178,81 @@ router.put('/update-discount/:id', async (req, res) => {
 // DELETE /admin/products/:id
 router.delete('/:id', async (req, res) => {
     try {
-        const count = await Product.destroy({
-            where: { product_id: req.params.id }
-        });
+        const { id } = req.params;
+        const product = await Product.findByPk(id);
 
-        count > 0
-            ? res.json({ message: 'Deleted' })
-            : res.status(404).json({ message: 'Not found' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// DELETE /admin/products/destroy-by-brand
-router.delete('/destroy-by-brand', async (req, res) => {
-    try {
-        if (!req.query.brand) {
-            return res.status(400).json({ message: 'No brand' });
-        }
-
-        const count = await Product.destroy({
-            where: { brand: req.query.brand }
-        });
-        res.json({ message: `Deleted ${count} products` });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// DELETE /admin/products/:id/picture/:pictureId
-router.delete('/:id/picture/:pictureId', async (req, res) => {
-    try {
-        const count = await Picture.destroy({
-            where: { id: req.params.pictureId }
-        });
-
-        count > 0
-            ? res.json({ message: 'Picture deleted' })
-            : res.status(404).json({ message: 'Not found' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// === SLUGS ===
-
-// POST /admin/products/generate-slugs
-router.post('/generate-slugs', async (req, res) => {
-    try {
-        const products = await Product.findAll({
-            where: { [Op.or]: [{ slug: null }, { slug: '' }] },
-            raw: true
-        });
-
-        let updated = 0;
-        for (const p of products) {
-            const slug = generateSlug(p.product_name, p.product_id);
-            if (slug) {
-                await Product.update({ slug }, { where: { product_id: p.product_id } });
-                updated++;
-            }
-        }
-
-        res.json({ success: true, updated });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// POST /admin/products/check-slug
-router.post('/check-slug', async (req, res) => {
-    try {
-        const { slug, product_id } = req.body;
-        const where = { slug };
-        if (product_id) where.product_id = { [Op.ne]: product_id };
-
-        const exists = await Product.findOne({ where });
-        res.json({ success: true, available: !exists });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// PUT /admin/products/regenerate-slug/:productId
-router.put('/regenerate-slug/:productId', async (req, res) => {
-    try {
-        const product = await Product.findByPk(req.params.productId);
         if (!product) {
-            return res.status(404).json({ message: 'Not found' });
+            return res.status(404).json({ error: 'Product not found' });
         }
 
-        const newSlug = generateSlug(product.product_name, product.product_id);
-        await product.update({ slug: newSlug });
+        const slug = product.slug;
+        await product.destroy();
+        await cache.invalidateProducts();
+        await cache.del(`product:${slug}`);
 
-        res.json({ success: true, new_slug: newSlug });
+        res.json({ message: 'Deleted' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// PUT /admin/products/:id/discount
+router.put('/:id/discount', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { discount, sale_price } = req.body;
+
+        const product = await Product.findByPk(id);
+        if (!product) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+
+        await product.update({ discount, sale_price });
+        await cache.invalidateProducts();
+
+        res.json({ product, message: 'Discount updated' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /admin/products/:id/pictures
+router.post('/:id/pictures', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { pictures } = req.body;
+
+        const product = await Product.findByPk(id);
+        if (!product) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+
+        const pics = (Array.isArray(pictures) ? pictures : [pictures])
+            .map(url => ({ product_id: id, pictures_name: url }));
+
+        await Picture.bulkCreate(pics);
+        await cache.del(`product:${product.slug}`);
+
+        res.json({ message: 'Pictures added' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /admin/products/:id/pictures/:pictureId
+router.delete('/:id/pictures/:pictureId', async (req, res) => {
+    try {
+        const { pictureId } = req.params;
+
+        const deleted = await Picture.destroy({
+            where: { id: pictureId }
+        });
+
+        if (!deleted) {
+            return res.status(404).json({ error: 'Picture not found' });
+        }
+
+        res.json({ message: 'Picture deleted' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

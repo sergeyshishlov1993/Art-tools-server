@@ -7,9 +7,6 @@ const {
 } = require('../db');
 
 class ProductService {
-    /**
-     * Отримати товари за статусом (sale, bestseller)
-     */
     static async getByStatus(status, limit) {
         const queryOptions = {
             where: {
@@ -36,9 +33,6 @@ class ProductService {
         return Product.findAll(queryOptions);
     }
 
-    /**
-     * Видалити статус товару
-     */
     static async removeStatus(productId, status) {
         return Product.update(
             { [status]: 'false' },
@@ -46,9 +40,6 @@ class ProductService {
         );
     }
 
-    /**
-     * Встановити статус товару
-     */
     static async setStatus(productId, status, value = 'true') {
         return Product.update(
             { [status]: value },
