@@ -9,6 +9,7 @@ const novaPoshtaRoutes = require('./novaPoshta');
 const productsRoutes = require('./products');
 const filtersRoutes = require('./filters');
 const categoryRoutes = require('./categories');
+const reviewsRoutes = require('./reviews');
 
 router.use('/home', homeRoutes);
 router.use('/feedback', feedbackRoutes);
@@ -18,5 +19,6 @@ router.use('/nova-poshta', novaPoshtaRoutes);
 router.use('/products', productsRoutes);
 router.use('/filters', filtersRoutes);
 router.use('/category', categoryRoutes)
+router.use('/reviews', reviewsRoutes)
 
 module.exports = router;

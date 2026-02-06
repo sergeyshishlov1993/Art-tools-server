@@ -23,9 +23,8 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
         if (cached) return res.json(cached);
 
         const { price_min, price_max, brand, sale, bestseller, discount, sort, ...attrFilters } = req.query;
-        const where = { sub_category_id: subCategoryId };
+        const where = { sub_category_id: subCategoryId, available: 'true' };
 
-        // Фільтр по ціні (price як string - потрібен CAST)
         if (price_min || price_max) {
             where[Op.and] = where[Op.and] || [];
             if (price_min) {
@@ -41,7 +40,7 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
         }
 
         if (brand) {
-            const brands = Array.isArray(brand) ? brand : brand.split(',');
+            const brands = Array.isArray(brand) ? brand : String(brand).split(',');
             where.brand = { [Op.in]: brands };
         }
 
@@ -49,26 +48,33 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
         if (bestseller === 'true') where.bestseller = 'true';
         if (discount === 'true') where.discount = { [Op.gt]: 0 };
 
+        // ВИПРАВЛЕНО: Сортування
         const sortMap = {
+            'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
             'price_asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+            'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
             'price_desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
             'name_asc': [['product_name', 'ASC']],
-            'newest': [['createdAt', 'DESC']]
+            'new': [['createdAt', 'DESC']],
+            'newest': [['createdAt', 'DESC']],
+            'popular': [
+                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                ['createdAt', 'DESC']
+            ]
         };
-        const order = sortMap[sort] || [['createdAt', 'DESC']];
+        const order = sortMap[sort] || sortMap['popular'];
 
-        // Фільтрація по атрибутах
-        const attrKeys = Object.keys(attrFilters).filter(k =>
-            !['page', 'limit'].includes(k)
-        );
+        const attrKeys = Object.keys(attrFilters).filter((key) => !['page', 'limit'].includes(key));
 
         if (attrKeys.length > 0) {
             let productIds = null;
 
             for (const attrSlug of attrKeys) {
-                const attrValues = Array.isArray(attrFilters[attrSlug])
-                    ? attrFilters[attrSlug]
-                    : attrFilters[attrSlug].split(',');
+                const attrValueRaw = attrFilters[attrSlug];
+                const attrValues = Array.isArray(attrValueRaw)
+                    ? attrValueRaw
+                    : String(attrValueRaw || '').split(',').filter(Boolean);
 
                 const params = await Parameter.findAll({
                     where: {
@@ -79,10 +85,13 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
                     raw: true
                 });
 
-                const ids = params.map(p => p.product_id);
-                productIds = productIds === null
-                    ? new Set(ids)
-                    : new Set([...productIds].filter(id => ids.includes(id)));
+                const ids = params.map((p) => p.product_id);
+                if (productIds === null) {
+                    productIds = new Set(ids);
+                } else {
+                    const idsSet = new Set(ids);
+                    productIds = new Set([...productIds].filter((id) => idsSet.has(id)));
+                }
             }
 
             if (productIds !== null && productIds.size > 0) {
@@ -111,7 +120,6 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
             distinct: true
         });
 
-        // Фільтри з кешу
         const filtersCacheKey = `filters:${subCategoryId}`;
         let filters = await cache.get(filtersCacheKey);
 
@@ -151,14 +159,14 @@ router.get('/category/:categoryId', async (req, res) => {
         if (cached) return res.json(cached);
 
         const subCategories = await SubCategory.findAll({
-            where: { category_id: categoryId },
+            where: { parent_id: categoryId },
             attributes: ['sub_category_id']
         });
 
-        const subCategoryIds = subCategories.map(sc => sc.sub_category_id);
+        const subCategoryIds = subCategories.map((sc) => sc.sub_category_id);
 
         const { count, rows } = await Product.findAndCountAll({
-            where: { sub_category_id: { [Op.in]: subCategoryIds } },
+            where: { sub_category_id: { [Op.in]: subCategoryIds }, available: 'true' },
             attributes: LIST_ATTRS,
             include: [{
                 model: Picture,
@@ -168,7 +176,10 @@ router.get('/category/:categoryId', async (req, res) => {
             }],
             limit,
             offset,
-            order: [['createdAt', 'DESC']],
+            order: [
+                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                ['createdAt', 'DESC']
+            ],
             distinct: true
         });
 
@@ -184,13 +195,123 @@ router.get('/category/:categoryId', async (req, res) => {
     }
 });
 
+// GET /products - головний ендпоінт з фільтрами
 router.get('/', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const offset = (page - 1) * limit;
 
+        const {
+            category,
+            sub_category,
+            brand,
+            price_min,
+            price_max,
+            sale,
+            bestseller,
+            with_discount,
+            sort,
+            ...attrFilters
+        } = req.query;
+
+        const where = { available: 'true' };
+
+        // Фільтр по категорії
+        if (sub_category) {
+            const subCategories = String(sub_category).split(',').filter(Boolean);
+            where.sub_category_id = { [Op.in]: subCategories };
+        } else if (category) {
+            const subCategories = await SubCategory.findAll({
+                where: { parent_id: category },
+                attributes: ['sub_category_id'],
+                raw: true
+            });
+            const subCategoryIds = subCategories.map(sc => sc.sub_category_id);
+            if (subCategoryIds.length > 0) {
+                where.sub_category_id = { [Op.in]: subCategoryIds };
+            }
+        }
+
+        // Фільтр по бренду
+        if (brand) {
+            const brands = String(brand).split(',').filter(Boolean);
+            where.brand = { [Op.in]: brands };
+        }
+
+        // Фільтр по ціні
+        if (price_min || price_max) {
+            where[Op.and] = where[Op.and] || [];
+            if (price_min) {
+                where[Op.and].push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) >= ${parseFloat(price_min)}`)
+                );
+            }
+            if (price_max) {
+                where[Op.and].push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) <= ${parseFloat(price_max)}`)
+                );
+            }
+        }
+
+        // Спеціальні фільтри
+        if (sale === 'true') where.sale = 'true';
+        if (bestseller === 'true') where.bestseller = 'true';
+        if (with_discount === 'true') where.discount = { [Op.gt]: 0 };
+
+        // Фільтр по атрибутах
+        const attrKeys = Object.keys(attrFilters).filter(key => !['page', 'limit'].includes(key));
+
+        if (attrKeys.length > 0) {
+            let productIds = null;
+
+            for (const attrSlug of attrKeys) {
+                const attrValues = String(attrFilters[attrSlug] || '').split(',').filter(Boolean);
+
+                const params = await Parameter.findAll({
+                    where: {
+                        slug: attrSlug,
+                        param_value_slug: { [Op.in]: attrValues }
+                    },
+                    attributes: ['product_id'],
+                    raw: true
+                });
+
+                const ids = params.map(p => p.product_id);
+
+                if (productIds === null) {
+                    productIds = new Set(ids);
+                } else {
+                    const idsSet = new Set(ids);
+                    productIds = new Set([...productIds].filter(id => idsSet.has(id)));
+                }
+            }
+
+            if (productIds !== null && productIds.size > 0) {
+                where.product_id = { [Op.in]: [...productIds] };
+            } else if (productIds !== null) {
+                return res.json({
+                    products: [],
+                    pagination: { page, limit, total: 0, pages: 0 }
+                });
+            }
+        }
+
+        // ВИПРАВЛЕНО: Сортування з урахуванням строкових значень
+        const sortMap = {
+            'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+            'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+            'new': [['createdAt', 'DESC']],
+            'popular': [
+                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                ['createdAt', 'DESC']
+            ]
+        };
+        const order = sortMap[sort] || sortMap['popular'];
+
         const { count, rows } = await Product.findAndCountAll({
+            where,
             attributes: LIST_ATTRS,
             include: [{
                 model: Picture,
@@ -200,7 +321,7 @@ router.get('/', async (req, res) => {
             }],
             limit,
             offset,
-            order: [['createdAt', 'DESC']],
+            order,
             distinct: true
         });
 
@@ -209,6 +330,7 @@ router.get('/', async (req, res) => {
             pagination: { page, limit, total: count, pages: Math.ceil(count / limit) }
         });
     } catch (error) {
+        console.error('Products error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -223,7 +345,7 @@ router.get('/:slug', async (req, res) => {
         if (cached) return res.json(cached);
 
         const product = await Product.findOne({
-            where: { slug },
+            where: { slug, available: 'true' },
             include: [
                 { model: Picture, as: 'pictures' },
                 { model: Parameter, as: 'params' },
@@ -246,6 +368,5 @@ router.get('/:slug', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
 
 module.exports = router;

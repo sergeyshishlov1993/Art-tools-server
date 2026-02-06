@@ -7,26 +7,19 @@ const categoriesRoutes = require('./categories');
 const importRoutes = require('./import');
 const filtersRoutes = require('./filters');
 const reviewsRoutes = require('./reviews');
+const ordersRoutes = require('./orders');
+const feedbacksRoutes = require('./feedback');
+const slidersRoutes = require('./slider');
 
-// Auth
 router.use('/login', authRoutes);
-
-// Products
 router.use('/products', productsRoutes);
-
-// Categories
 router.use('/categories', categoriesRoutes);
-
-// Import
 router.use('/import', importRoutes);
-
-// Filters
 router.use('/filters', filtersRoutes);
-
-// Reviews
 router.use('/reviews', reviewsRoutes);
-
-// Health check
+router.use('/orders', ordersRoutes);
+router.use('/feedback', feedbacksRoutes);
+router.use('/sliders', slidersRoutes);
 router.get('/', (req, res) => {
     res.json({ message: 'Admin API' });
 });

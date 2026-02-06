@@ -1,7 +1,9 @@
 const { Router } = require('express');
 const { Op } = require('sequelize');
 const router = Router();
-const { Product, Category, SubCategory, CategoryMapping } = require('../../db');
+const { Product, Category, SubCategory } = require('../../db');
+
+const FilterService = require('../../services/filterService');
 
 const slugify = (text) => text.toString().toLowerCase()
     .replace(/\s+/g, '-')
@@ -48,128 +50,21 @@ router.get('/overview', async (req, res) => {
     }
 });
 
-// GET /admin/categories/my-catalogue
-router.get('/my-catalogue', async (req, res) => {
-    try {
-        const [categories] = await Product.sequelize.query(`
-            SELECT 
-                c.id,
-                c.category_name,
-                COALESCE(
-                    json_agg(
-                        json_build_object(
-                            'id', sc.sub_category_id,
-                            'name', sc.sub_category_name,
-                            'picture', sc.pictures,
-                            'products_count', COALESCE(p.cnt, 0)
-                        ) ORDER BY sc.sub_category_name
-                    ) FILTER (WHERE sc.sub_category_id IS NOT NULL),
-                    '[]'
-                ) as subcategories,
-                COALESCE(SUM(p.cnt), 0) as total_products
-            FROM category c
-            LEFT JOIN sub_category sc ON sc.parent_id = c.id
-            LEFT JOIN (
-                SELECT sub_category_id, COUNT(*) as cnt 
-                FROM products 
-                GROUP BY sub_category_id
-            ) p ON p.sub_category_id = sc.sub_category_id
-            WHERE c.id NOT LIKE 'DEFAULT%' AND c.id NOT LIKE 'PROCRAFT%'
-            GROUP BY c.id, c.category_name
-            ORDER BY c.category_name
-        `);
-
-        res.json({
-            success: true,
-            total_categories: categories.length,
-            total_products: categories.reduce((sum, c) => sum + (+c.total_products || 0), 0),
-            categories
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// GET /admin/categories/active
-router.get('/active', async (req, res) => {
-    try {
-        const [subCats] = await Product.sequelize.query(`
-            SELECT DISTINCT 
-                sc.sub_category_id, 
-                sc.sub_category_name, 
-                sc.parent_id, 
-                COUNT(p.product_id) as product_count
-            FROM sub_category sc
-            INNER JOIN products p ON p.sub_category_id = sc.sub_category_id
-            WHERE p.available = 'true'
-            GROUP BY sc.sub_category_id, sc.sub_category_name, sc.parent_id
-            HAVING COUNT(p.product_id) > 0
-        `);
-
-        const parentIds = [...new Set(subCats.map(sc => sc.parent_id).filter(Boolean))];
-        const cats = parentIds.length
-            ? await Category.findAll({ where: { id: parentIds }, raw: true })
-            : [];
-
-        res.json({ success: true, categories: cats, subcategories: subCats });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// GET /admin/categories/sub-category
-router.get('/sub-category', async (req, res) => {
-    const { page = 1, limit = 10 } = req.query;
-
-    try {
-        const category = await Category.findAll();
-        const subCategory = await SubCategory.findAndCountAll({
-            distinct: true,
-            offset: (page - 1) * limit,
-            limit: parseInt(limit)
-        });
-
-        res.json({
-            category,
-            subCategory: subCategory.rows,
-            total: subCategory.count
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// GET /admin/categories/unmapped
 // GET /admin/categories/unmapped
 router.get('/unmapped', async (req, res) => {
     try {
-        // Знаходимо всі підкатегорії постачальників
-        const supplierSubCats = await SubCategory.findAll({
-            where: {
-                [Op.or]: [
-                    { sub_category_id: { [Op.like]: 'DEFAULT_%' } },
-                    { sub_category_id: { [Op.like]: 'PROCRAFT_%' } }
-                ]
-            },
-            raw: true
-        });
-
-        const result = [];
-        for (const subCat of supplierSubCats) {
-            const productCount = await Product.count({
-                where: { sub_category_id: subCat.sub_category_id }
-            });
-
-            if (productCount > 0) {
-                result.push({
-                    supplier_sub_category_id: subCat.sub_category_id,
-                    supplier_sub_category_name: subCat.sub_category_name,
-                    product_count: productCount
-                });
-            }
-        }
-
-        result.sort((a, b) => b.product_count - a.product_count);
+        const [supplierSubCats] = await Product.sequelize.query(`
+            SELECT 
+                sc.sub_category_id as supplier_sub_category_id,
+                sc.sub_category_name as supplier_sub_category_name,
+                COUNT(p.product_id) as product_count
+            FROM sub_category sc
+            INNER JOIN products p ON p.sub_category_id = sc.sub_category_id
+            WHERE (sc.sub_category_id LIKE 'DEFAULT_%' OR sc.sub_category_id LIKE 'PROCRAFT_%')
+            GROUP BY sc.sub_category_id, sc.sub_category_name
+            HAVING COUNT(p.product_id) > 0
+            ORDER BY COUNT(p.product_id) DESC
+        `);
 
         const [mySubCategories] = await Product.sequelize.query(`
             SELECT 
@@ -183,19 +78,19 @@ router.get('/unmapped', async (req, res) => {
             ORDER BY c.category_name, sc.sub_category_name
         `);
 
+        const totalProducts = supplierSubCats.reduce((sum, r) => sum + (+r.product_count || 0), 0);
+
         res.json({
-            total_unmapped: result.length,
-            total_products: result.reduce((sum, r) => sum + r.product_count, 0),
-            categories: result,
+            total_unmapped: supplierSubCats.length,
+            total_products: totalProducts,
+            categories: supplierSubCats,
             my_categories: mySubCategories
         });
-
     } catch (error) {
         console.error('Unmapped categories error:', error);
         res.status(500).json({ error: error.message });
     }
 });
-
 
 // POST /admin/categories/map
 router.post('/map', async (req, res) => {
@@ -229,7 +124,6 @@ router.post('/map', async (req, res) => {
             const parentMatch = from_sub_category_id.match(/^([A-Z]+)_/);
             if (parentMatch) {
                 const prefix = parentMatch[1];
-                const parentId = from_sub_category_id.replace('_SUBCAT_', '_CAT_').replace('_ROOT', '');
 
                 const siblingCount = await SubCategory.count({
                     where: { parent_id: { [Op.like]: `${prefix}_CAT_%` } }
@@ -243,7 +137,6 @@ router.post('/map', async (req, res) => {
             }
         }
 
-        const FilterService = require('../../services/filterService');
         await FilterService.recalcForCategory(to_sub_category_id);
 
         res.json({
@@ -253,7 +146,6 @@ router.post('/map', async (req, res) => {
             from: from_sub_category_id,
             to: to_sub_category_id
         });
-
     } catch (error) {
         console.error('Map category error:', error);
         res.status(500).json({ error: error.message });

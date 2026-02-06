@@ -3,15 +3,14 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { Op, fn, col } = require('sequelize');
+const { Op } = require('sequelize');
 const ImportService = require('../../services/importService');
 const {
     getMappingsForSupplier,
     updateMapping,
-    clearMappingsForSupplier,
-    findBestMapping
+    clearMappingsForSupplier
 } = require('../../services/autoMappingService');
-const { SubCategory, Category, CategoryMapping, ImportSource } = require('../../db');
+const { SubCategory, Category, CategoryMapping, ImportSource, Product } = require('../../db');
 
 const SOURCES_DIR = path.join(__dirname, '../../../sources');
 if (!fs.existsSync(SOURCES_DIR)) {
@@ -21,14 +20,49 @@ if (!fs.existsSync(SOURCES_DIR)) {
 const upload = multer({
     dest: path.join(__dirname, '../../../temp'),
     fileFilter: (req, file, cb) => {
-        if (file.originalname.endsWith('.xml')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only XML files allowed'), false);
-        }
+        if (file.originalname.endsWith('.xml')) cb(null, true);
+        else cb(new Error('Only XML files allowed'), false);
     },
     limits: { fileSize: 100 * 1024 * 1024 }
 });
+
+async function getSupplierPrefixes() {
+    const sources = await ImportSource.findAll({
+        attributes: ['supplier_prefix'],
+        raw: true
+    });
+
+    const fromSources = sources
+        .map(s => String(s.supplier_prefix || '').trim().toUpperCase())
+        .filter(Boolean);
+
+    if (fromSources.length > 0) {
+        return Array.from(new Set(fromSources));
+    }
+
+    const products = await Product.findAll({
+        attributes: ['supplier_prefix'],
+        where: { supplier_prefix: { [Op.ne]: null } },
+        group: ['supplier_prefix'],
+        raw: true
+    });
+
+    const fromProducts = products
+        .map(p => String(p.supplier_prefix || '').trim().toUpperCase())
+        .filter(Boolean);
+
+    return Array.from(new Set(fromProducts));
+}
+
+async function buildInternalSubCategoryWhere() {
+    const prefixes = await getSupplierPrefixes();
+    const conditions = prefixes.map(prefix => ({
+        sub_category_id: { [Op.notLike]: `${prefix}_%` }
+    }));
+
+    if (conditions.length === 0) return {};
+    return { [Op.and]: conditions };
+}
 
 // POST /api/admin/import/url
 router.post('/url', async (req, res) => {
@@ -39,7 +73,7 @@ router.post('/url', async (req, res) => {
             return res.status(400).json({ success: false, error: 'xmlUrl is required' });
         }
 
-        const prefix = supplierPrefix.toUpperCase();
+        const prefix = String(supplierPrefix).toUpperCase().trim() || 'DEFAULT';
 
         let [source, created] = await ImportSource.findOrCreate({
             where: { supplier_prefix: prefix },
@@ -98,7 +132,7 @@ router.post('/file', upload.single('file'), async (req, res) => {
             return res.status(400).json({ success: false, error: 'No file uploaded' });
         }
 
-        const supplierPrefix = (req.body.supplierPrefix || 'DEFAULT').toUpperCase();
+        const supplierPrefix = String(req.body.supplierPrefix || 'DEFAULT').toUpperCase().trim() || 'DEFAULT';
         const supplierName = req.body.supplierName || supplierPrefix;
         const filename = `${supplierPrefix}.xml`;
         const destPath = path.join(SOURCES_DIR, filename);
@@ -154,7 +188,7 @@ router.post('/file', upload.single('file'), async (req, res) => {
     }
 });
 
-// GET /api/admin/import/sources - список всіх джерел
+// GET /api/admin/import/sources
 router.get('/sources', async (req, res) => {
     try {
         const sources = await ImportSource.findAll({
@@ -231,9 +265,7 @@ router.put('/sources/:id/file', upload.single('file'), async (req, res) => {
 
         const source = await ImportSource.findByPk(id);
         if (!source) {
-            if (tempFilePath && fs.existsSync(tempFilePath)) {
-                fs.unlinkSync(tempFilePath);
-            }
+            if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
             return res.status(404).json({ success: false, error: 'Source not found' });
         }
 
@@ -266,9 +298,7 @@ router.put('/sources/:id/file', upload.single('file'), async (req, res) => {
             }
         });
     } catch (error) {
-        if (tempFilePath && fs.existsSync(tempFilePath)) {
-            fs.unlinkSync(tempFilePath);
-        }
+        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -296,7 +326,7 @@ router.delete('/sources/:id', async (req, res) => {
     }
 });
 
-// POST /api/admin/import/sources/:id/run - запустити імпорт
+// POST /api/admin/import/sources/:id/run
 router.post('/sources/:id/run', async (req, res) => {
     try {
         const { id } = req.params;
@@ -433,7 +463,11 @@ router.post('/mapping', async (req, res) => {
             });
         }
 
-        const result = await updateMapping(supplierPrefix, externalCategoryId, internalCategoryId);
+        const result = await updateMapping(
+            String(supplierPrefix).toUpperCase().trim(),
+            externalCategoryId,
+            internalCategoryId
+        );
         res.json({ success: true, ...result });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -491,24 +525,21 @@ router.delete('/mappings/:supplier', async (req, res) => {
 router.get('/unmapped/:supplierPrefix', async (req, res) => {
     try {
         const { supplierPrefix } = req.params;
+        const normalizedPrefix = String(supplierPrefix).toUpperCase().trim();
 
         const unmapped = await CategoryMapping.findAll({
             where: {
-                supplier_prefix: supplierPrefix,
+                supplier_prefix: normalizedPrefix,
                 internal_sub_category_id: null
             },
             order: [['external_category_name', 'ASC']],
             raw: true
         });
 
+        const internalWhere = await buildInternalSubCategoryWhere();
+
         const subCategories = await SubCategory.findAll({
-            where: {
-                sub_category_id: {
-                    [Op.notLike]: 'DEFAULT_%',
-                    [Op.notLike]: 'PROCRAFT_%',
-                    [Op.notLike]: 'GROSSER_%'
-                }
-            },
+            where: internalWhere,
             include: [{
                 model: Category,
                 as: 'category',
@@ -519,7 +550,7 @@ router.get('/unmapped/:supplierPrefix', async (req, res) => {
 
         res.json({
             success: true,
-            supplier: supplierPrefix,
+            supplier: normalizedPrefix,
             count: unmapped.length,
             unmapped: unmapped.map(m => ({
                 id: m.id,
@@ -541,21 +572,22 @@ router.get('/unmapped/:supplierPrefix', async (req, res) => {
 router.get('/stats/:supplierPrefix', async (req, res) => {
     try {
         const { supplierPrefix } = req.params;
+        const normalizedPrefix = String(supplierPrefix).toUpperCase().trim();
 
         const total = await CategoryMapping.count({
-            where: { supplier_prefix: supplierPrefix }
+            where: { supplier_prefix: normalizedPrefix }
         });
 
         const mapped = await CategoryMapping.count({
             where: {
-                supplier_prefix: supplierPrefix,
+                supplier_prefix: normalizedPrefix,
                 internal_sub_category_id: { [Op.ne]: null }
             }
         });
 
         res.json({
             success: true,
-            supplier: supplierPrefix,
+            supplier: normalizedPrefix,
             stats: {
                 total,
                 mapped,
@@ -570,14 +602,10 @@ router.get('/stats/:supplierPrefix', async (req, res) => {
 
 router.get('/targets', async (req, res) => {
     try {
+        const internalWhere = await buildInternalSubCategoryWhere();
+
         const categories = await SubCategory.findAll({
-            where: {
-                sub_category_id: {
-                    [Op.notLike]: 'DEFAULT_%',
-                    [Op.notLike]: 'PROCRAFT_%',
-                    [Op.notLike]: 'GROSSER_%'
-                }
-            },
+            where: internalWhere,
             include: [{
                 model: Category,
                 as: 'category',

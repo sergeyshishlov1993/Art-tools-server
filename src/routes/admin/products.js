@@ -11,14 +11,51 @@ const LIST_ATTRS = [
     'createdAt', 'updatedAt'
 ];
 
+function parsePageLimit(query) {
+    const pageRaw = typeof query.page === 'string' ? query.page : '';
+    const limitRaw = typeof query.limit === 'string' ? query.limit : '';
+    const page = Math.max(parseInt(pageRaw || '1', 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(limitRaw || '20', 10) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+    return { page, limit, offset };
+}
+
+function normalizeBrands(brandQueryValue) {
+    if (!brandQueryValue) return null;
+
+    if (Array.isArray(brandQueryValue)) {
+        const value = brandQueryValue.map(String).map(s => s.trim()).filter(Boolean);
+        return value.length > 0 ? value : null;
+    }
+
+    const asString = String(brandQueryValue);
+    const value = asString.split(',').map(s => s.trim()).filter(Boolean);
+    return value.length > 0 ? value : null;
+}
+
+function parseNumberOrNull(value) {
+    if (value === null || value === undefined) return null;
+    const parsed = Number.parseFloat(String(value));
+    if (Number.isNaN(parsed)) return null;
+    return parsed;
+}
+
 // GET /admin/products
 router.get('/', async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-        const offset = (page - 1) * limit;
+        const { page, limit, offset } = parsePageLimit(req.query);
 
-        const { search, sub_category, category, brand, sale, bestseller, available, sort, price_min, price_max } = req.query;
+        const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const subCategory = typeof req.query.sub_category === 'string' ? req.query.sub_category.trim() : '';
+        const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+        const sale = typeof req.query.sale === 'string' ? req.query.sale : '';
+        const bestseller = typeof req.query.bestseller === 'string' ? req.query.bestseller : '';
+        const available = typeof req.query.available === 'string' ? req.query.available : '';
+        const sort = typeof req.query.sort === 'string' ? req.query.sort : '';
+        const priceMin = parseNumberOrNull(req.query.price_min);
+        const priceMax = parseNumberOrNull(req.query.price_max);
+        const brands = normalizeBrands(req.query.brand);
+
         const where = {};
 
         if (search) {
@@ -29,33 +66,38 @@ router.get('/', async (req, res) => {
             ];
         }
 
-        if (sub_category) {
-            where.sub_category_id = sub_category;
+        if (subCategory) {
+            where.sub_category_id = subCategory;
         } else if (category) {
             const subCats = await SubCategory.findAll({
                 where: { category_id: category },
-                attributes: ['sub_category_id']
+                attributes: ['sub_category_id'],
+                raw: true
             });
-            where.sub_category_id = { [Op.in]: subCats.map(sc => sc.sub_category_id) };
+            const ids = subCats.map(sc => sc.sub_category_id).filter(Boolean);
+            where.sub_category_id = ids.length > 0 ? { [Op.in]: ids } : { [Op.in]: [] };
         }
 
-        if (brand) {
-            const brands = Array.isArray(brand) ? brand : brand.split(',');
+        if (brands) {
             where.brand = { [Op.in]: brands };
         }
 
-        // Фільтр по ціні
-        if (price_min || price_max) {
-            where[Op.and] = where[Op.and] || [];
-            if (price_min) {
-                where[Op.and].push(
-                    Sequelize.literal(`CAST(price AS DECIMAL) >= ${parseFloat(price_min)}`)
+        if (priceMin !== null || priceMax !== null) {
+            const andParts = [];
+
+            if (priceMin !== null) {
+                andParts.push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) >= ${priceMin}`)
                 );
             }
-            if (price_max) {
-                where[Op.and].push(
-                    Sequelize.literal(`CAST(price AS DECIMAL) <= ${parseFloat(price_max)}`)
+            if (priceMax !== null) {
+                andParts.push(
+                    Sequelize.literal(`CAST(price AS DECIMAL) <= ${priceMax}`)
                 );
+            }
+
+            if (andParts.length > 0) {
+                where[Op.and] = andParts;
             }
         }
 
@@ -65,12 +107,12 @@ router.get('/', async (req, res) => {
         if (available === 'false') where.available = 'false';
 
         const sortMap = {
-            'price_asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-            'price_desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-            'name_asc': [['product_name', 'ASC']],
-            'newest': [['createdAt', 'DESC']]
+            price_asc: [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+            price_desc: [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+            name_asc: [['product_name', 'ASC']],
+            newest: [['createdAt', 'DESC']]
         };
-        const order = sortMap[sort] || [['createdAt', 'DESC']];
+        const order = Object.prototype.hasOwnProperty.call(sortMap, sort) ? sortMap[sort] : [['createdAt', 'DESC']];
 
         const { count, rows } = await Product.findAndCountAll({
             where,
@@ -139,13 +181,14 @@ router.post('/', async (req, res) => {
         }
 
         if (!data.slug && data.product_name) {
-            data.slug = data.product_name
+            data.slug = String(data.product_name)
                 .toLowerCase()
                 .replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
                 .replace(/^-|-$/g, '');
         }
 
         data.custom_product = true;
+
         const product = await Product.create(data);
         await cache.invalidateProducts();
 

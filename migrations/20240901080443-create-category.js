@@ -12,6 +12,10 @@ module.exports = {
                 type: Sequelize.STRING,
                 allowNull: false,
             },
+            icon: {
+                type: Sequelize.STRING(100),
+                allowNull: true,
+            },
         });
     },
 

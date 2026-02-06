@@ -1,7 +1,8 @@
 const axios = require('axios');
 const fs = require('fs');
 const xml2js = require('xml2js');
-const { Product, Parameter, Picture } = require('../db');
+const { Op } = require('sequelize');
+const { Product, Parameter, Picture, ImportSource } = require('../db');
 const { mapCategoriesFromXML, getInternalCategoryForProduct } = require('./autoMappingService');
 const FilterService = require('./filterService');
 const { generateSlug, generateFilterSlug } = require('../utils/slugify');
@@ -201,9 +202,7 @@ function extractParamsFromHtml(html) {
         if (separatorIndex > 0) {
             const name = content.substring(0, separatorIndex).trim();
             const value = content.substring(separatorIndex + 1).trim();
-            if (name && value) {
-                params.push({ name, value });
-            }
+            if (name && value) params.push({ name, value });
         }
     }
 
@@ -275,6 +274,34 @@ function buildParameterEntriesFromNameValue(parameterName, parameterValue) {
     return result;
 }
 
+async function getSupplierPrefixes() {
+    const sources = await ImportSource.findAll({
+        attributes: ['supplier_prefix'],
+        raw: true
+    });
+
+    const prefixes = sources
+        .map(s => String(s.supplier_prefix || '').trim().toUpperCase())
+        .filter(Boolean);
+
+    if (prefixes.length > 0) return Array.from(new Set(prefixes));
+
+    const products = await Product.findAll({
+        attributes: ['supplier_prefix'],
+        where: { supplier_prefix: { [Op.ne]: null } },
+        group: ['supplier_prefix'],
+        raw: true
+    });
+
+    return Array.from(
+        new Set(
+            products
+                .map(p => String(p.supplier_prefix || '').trim().toUpperCase())
+                .filter(Boolean)
+        )
+    );
+}
+
 class ImportService {
     static async importFromFeed(url, options) {
         const effectiveOptions = options || {};
@@ -296,7 +323,7 @@ class ImportService {
 
     static async processXML(xmlData, options) {
         const effectiveOptions = options || {};
-        const supplierPrefix = effectiveOptions.supplierPrefix || 'DEFAULT';
+        const supplierPrefix = String(effectiveOptions.supplierPrefix || 'DEFAULT').toUpperCase().trim() || 'DEFAULT';
 
         const parser = new xml2js.Parser({
             explicitArray: false,
@@ -408,11 +435,8 @@ class ImportService {
 
                 const created = Array.isArray(upsertResult) ? Boolean(upsertResult[1]) : false;
 
-                if (created) {
-                    stats.created += 1;
-                } else {
-                    stats.updated += 1;
-                }
+                if (created) stats.created += 1;
+                else stats.updated += 1;
 
                 await this._saveParameters(productId, offer);
                 await this._savePictures(productId, offer);
@@ -453,9 +477,7 @@ class ImportService {
         }
 
         const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
-
         const discount = oldPrice && oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
-
         const finalName = name || `Product_${offer.id || 'unknown'}`;
 
         return {
@@ -588,17 +610,31 @@ class ImportService {
     }
 
     static async _getAffectedCategories(supplierPrefix) {
-        const queryResult = await Product.sequelize.query(
-            `SELECT DISTINCT sub_category_id 
-             FROM products 
-             WHERE supplier_prefix = :supplierPrefix 
-             AND sub_category_id IS NOT NULL
-             AND sub_category_id NOT LIKE '%\\_%'`,
-            { replacements: { supplierPrefix: supplierPrefix } }
-        );
+        const prefixes = await getSupplierPrefixes();
+        const normalizedPrefixes = prefixes.map(p => String(p).toUpperCase().trim()).filter(Boolean);
 
-        const results = Array.isArray(queryResult) ? queryResult[0] : [];
-        return results.map((r) => r.sub_category_id);
+        const supplierProducts = await Product.findAll({
+            attributes: ['sub_category_id'],
+            where: {
+                supplier_prefix: supplierPrefix,
+                sub_category_id: { [Op.ne]: null }
+            },
+            group: ['sub_category_id'],
+            raw: true
+        });
+
+        const ids = supplierProducts
+            .map(r => String(r.sub_category_id || '').trim())
+            .filter(Boolean);
+
+        if (ids.length === 0) return [];
+
+        const internalIds = ids.filter(id => {
+            const upper = id.toUpperCase();
+            return !normalizedPrefixes.some(prefix => upper.startsWith(`${prefix}_`));
+        });
+
+        return Array.from(new Set(internalIds));
     }
 }
 

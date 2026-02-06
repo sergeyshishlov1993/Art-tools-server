@@ -23,8 +23,8 @@ app.get('/docs.json', (req, res) => {
     res.send(swaggerSpec);
 });
 
-app.use('/', publicRoutes);
-app.use('/admin', adminRoutes);
+app.use('/api', publicRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/health', (req, res) => {
     res.json({

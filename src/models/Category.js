@@ -12,6 +12,10 @@ module.exports = (sequelize) =>
                 type: DataTypes.STRING,
                 allowNull: false,
             },
+            icon: {
+                type: DataTypes.STRING(100),
+                allowNull: true,
+            },
         },
         {
             tableName: "category",
