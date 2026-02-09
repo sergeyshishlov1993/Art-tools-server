@@ -1,14 +1,20 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 
 const publicRoutes = require('./routes/public');
 const adminRoutes = require('./routes/admin');
 const telegramService = require('./services/telegramService');
+const { startTrackingSyncJob } = require('../jobs/trackingSyncJob');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+const socketService = require('./services/socketService');
 
 const app = express();
+const server = http.createServer(app);  // ✅ Створюємо HTTP server
+
+socketService.init(server);
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -45,10 +51,13 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.APP_PORT || 8000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📚 API Docs: http://localhost:${PORT}/docs`);
+    console.log(`🔌 WebSocket ready`);
+
     telegramService.init();
+    startTrackingSyncJob();
 });
 
-module.exports = app;
+module.exports = { app, server };

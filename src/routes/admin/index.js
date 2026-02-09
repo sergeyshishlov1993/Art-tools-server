@@ -10,6 +10,7 @@ const reviewsRoutes = require('./reviews');
 const ordersRoutes = require('./orders');
 const feedbacksRoutes = require('./feedback');
 const slidersRoutes = require('./slider');
+const trackingRoutes = require('./trackingRoutes');
 
 router.use('/login', authRoutes);
 router.use('/products', productsRoutes);
@@ -20,6 +21,7 @@ router.use('/reviews', reviewsRoutes);
 router.use('/orders', ordersRoutes);
 router.use('/feedback', feedbacksRoutes);
 router.use('/sliders', slidersRoutes);
+router.use('/tracking', trackingRoutes)
 router.get('/', (req, res) => {
     res.json({ message: 'Admin API' });
 });

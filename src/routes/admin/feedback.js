@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const router = Router();
 const { Feedback } = require('../../db');
+const { Op } = require('sequelize');
 
 router.get('/all', async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
@@ -48,5 +49,19 @@ router.delete('/delete/:id', async (req, res) => {
         res.status(500).json({ message: 'Помилка сервера' });
     }
 });
+
+router.get('/count-new', async (req, res) => {
+    try {
+        const count = await Feedback.count({
+            where: {
+                status: { [Op.or]: [null, '', 'Новий'] }
+            }
+        })
+        res.json({ count })
+    } catch (error) {
+        console.error('Помилка:', error)
+        res.status(500).json({ message: 'Помилка сервера' })
+    }
+})
 
 module.exports = router;

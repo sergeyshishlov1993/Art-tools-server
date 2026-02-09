@@ -212,10 +212,23 @@ router.get('/', async (req, res) => {
             bestseller,
             with_discount,
             sort,
+            search,  // <-- ДОДАНО
             ...attrFilters
         } = req.query;
 
         const where = { available: 'true' };
+
+        // ========== ПОШУК ========== //
+        if (search) {
+            const searchTerm = String(search).trim();
+            if (searchTerm) {
+                where[Op.or] = [
+                    { product_name: { [Op.iLike]: `%${searchTerm}%` } },
+                    { brand: { [Op.iLike]: `%${searchTerm}%` } },
+                    { product_id: { [Op.iLike]: `%${searchTerm}%` } }
+                ];
+            }
+        }
 
         // Фільтр по категорії
         if (sub_category) {
@@ -297,18 +310,29 @@ router.get('/', async (req, res) => {
             }
         }
 
-        // ВИПРАВЛЕНО: Сортування з урахуванням строкових значень
-        const sortMap = {
-            'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-            'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-            'new': [['createdAt', 'DESC']],
-            'popular': [
+        // Сортування (для пошуку - по релевантності)
+        let order;
+        if (search && !sort) {
+            // При пошуку сортуємо по релевантності (точне співпадіння першим)
+            const searchTerm = String(search).trim();
+            order = [
+                [Sequelize.literal(`CASE WHEN product_name ILIKE '${searchTerm}%' THEN 0 WHEN product_name ILIKE '%${searchTerm}%' THEN 1 ELSE 2 END`), 'ASC'],
                 [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
                 ['createdAt', 'DESC']
-            ]
-        };
-        const order = sortMap[sort] || sortMap['popular'];
+            ];
+        } else {
+            const sortMap = {
+                'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+                'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+                'new': [['createdAt', 'DESC']],
+                'popular': [
+                    [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                    [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                    ['createdAt', 'DESC']
+                ]
+            };
+            order = sortMap[sort] || sortMap['popular'];
+        }
 
         const { count, rows } = await Product.findAndCountAll({
             where,

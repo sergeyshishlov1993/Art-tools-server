@@ -8,18 +8,88 @@ const FilterService = require('./filterService');
 const { generateSlug, generateFilterSlug } = require('../utils/slugify');
 const { parseDescriptionSpecs } = require('./parsers/descriptionSpecsParser');
 
+// === КОНСТАНТИ ===
+
 const BRAND_MAP = {
     grosser: 'Grosser',
     grasser: 'Grosser',
     procraft: 'Procraft',
-    cleaner: 'Cleaner'
+    cleaner: 'Cleaner',
+    'profi-tec': 'PROFI-TEC',
+    profitec: 'PROFI-TEC'
 };
 
 const normalizeBrand = (brand) => {
     if (!brand) return null;
-    const key = String(brand).toLowerCase().trim();
+    const key = String(brand).toLowerCase().trim().replace(/[\s-]+/g, '-');
     return BRAND_MAP[key] || String(brand).trim();
 };
+
+// Маппінг кастомних тегів Google Shopping на наші параметри
+const RSS_TAG_TO_PARAM_MAP = {
+    // Потужність
+    'potuzhnist': 'Потужність',
+    'potuzhnist-dvyguna': 'Потужність',
+    'power': 'Потужність',
+    'moshchnost': 'Потужність',
+
+    // Напруга
+    'napruga': 'Напруга',
+    'voltage': 'Напруга',
+    'napryazhenie': 'Напруга',
+
+    // Тиск
+    'maksymalnyj-tysk': 'Робочий тиск',
+    'robochyj-tysk': 'Робочий тиск',
+    'tysk': 'Робочий тиск',
+    'davlenie': 'Робочий тиск',
+
+    // Продуктивність
+    'produktyvnist': 'Продуктивність',
+    'proizvoditelnost': 'Продуктивність',
+
+    // Ємність
+    'yemnist': 'Ємність',
+    'yemnist-baka': 'Ємність бака',
+    'obyem-baka': 'Ємність бака',
+    'emkost': 'Ємність',
+
+    // Вага
+    'vaga': 'Вага',
+    'vaga-netto': 'Вага',
+    'ves': 'Вага',
+    'weight': 'Вага',
+
+    // Габарити
+    'gabaryty': 'Габарити',
+    'gabaryty-upakovky': 'Габарити',
+    'razmery': 'Габарити',
+
+    // Оберти
+    'oberty': 'Оберти',
+    'kilkist-obertiv': 'Оберти',
+    'chastota-obertannya': 'Оберти',
+
+    // Діаметр
+    'diametr': 'Діаметр',
+    'diametr-dyska': 'Діаметр диска',
+
+    // Довжина
+    'dovzhyna': 'Довжина',
+    'dovzhyna-shyny': 'Довжина шини',
+    'dlina': 'Довжина'
+};
+
+// Теги які ігноруємо
+const IGNORED_RSS_TAGS = new Set([
+    'g:id', 'g:title', 'g:description', 'g:link', 'g:image_link',
+    'g:availability', 'g:price', 'g:sale_price', 'g:product_type',
+    'g:condition', 'g:additional_image_link', 'g:checkout_link_template',
+    'g:identifier_exists', 'g:google_product_category',
+    'id', 'title', 'description', 'link', 'image_link',
+    'Article', 'Language', 'Vendor', 'priceCurrency', 'priceOpt',
+    'price-regular', 'garantiya', 'garantija'
+]);
 
 const ALLOWED_PARAMETER_BASES = new Map([
     ['potuzhnist', 'Потужність'],
@@ -29,135 +99,82 @@ const ALLOWED_PARAMETER_BASES = new Map([
     ['yemkist-akumulyatora', 'Ємність акумулятора'],
     ['krutnyy-moment', 'Крутний момент'],
     ['kilkist-obertiv', 'Кількість обертів'],
-    ['kilkist-obertiv-kholostogo-khodu', 'Кількість обертів холостого ходу'],
+    ['oberty', 'Оберти'],
     ['chastota-udariv', 'Частота ударів'],
     ['shvydkist', 'Швидкість'],
-    ['shvydkist-obertannya', 'Швидкість обертання'],
-    ['shvydkist-obertiv', 'Швидкість обертів'],
-    ['shvydkist-kholostogo-khodu', 'Швидкість холостого ходу'],
     ['vaga', 'Вага'],
     ['diametr-dyska', 'Діаметр диска'],
     ['diametr-patrona', 'Діаметр патрона'],
     ['typ-akumulyatora', 'Тип акумулятора'],
     ['typ-dvyguna', 'Тип двигуна'],
     ['dzherelo-zhyvlennya', 'Джерело живлення'],
-    ['zhyvlennya', 'Живлення'],
     ['potik-povitrya', 'Потік повітря'],
-    ['svitlovyy-potik', 'Світловий потік'],
-    ['riven-zvukovogo-tysku', 'Рівень звукового тиску'],
-    ['riven-zvukovoyi-potuzhnosti', 'Рівень звукової потужності'],
-    ['syla-udaru', 'Сила удару'],
-    ['syla-strumu', 'Сила струму'],
-    ['chastota-strumu', 'Частота струму'],
-    ['nominalnyy-strum', 'Номінальний струм'],
-    ['vkhidna-napruga', 'Вхідна напруга'],
-    ['vykhidna-napruga', 'Вихідна напруга'],
-    ['napruga-zhyvlennya', 'Напруга живлення'],
-    ['material', 'Матеріал'],
-    ['korpus', 'Корпус'],
-    ['klas-zakhystu', 'Клас захисту'],
-    ['klas-izolyatsiyi', 'Клас ізоляції'],
-    ['plavnyy-pusk', 'Плавний пуск'],
-    ['revers', 'Реверс'],
-    ['nayavnist-reversu', 'Наявність реверсу'],
-    ['regulyuvannya-obertiv', 'Регулювання обертів'],
-    ['regulyuvannya-shvydkosti', 'Регулювання швидкості'],
-    ['regulyuvannya-polozhennya-golovy', 'Регулювання положення голови'],
-    ['robocha-temperatura', 'Робоча температура'],
     ['robochyy-tysk', 'Робочий тиск'],
-    ['obyem-baka', "Обʼєм бака"],
-    ['obyem-dvyguna', "Об'єм двигуна"],
-    ['obyem-pylozbirnyka', "Об'єм пилозбірника"],
+    ['produktyvnist', 'Продуктивність'],
+    ['obyem-baka', 'Ємність бака'],
     ['dovzhyna', 'Довжина'],
-    ['dovzhyna-leza', 'Довжина леза'],
-    ['dovzhyna-lez', 'Довжина лез'],
     ['dovzhyna-shyny', 'Довжина шини'],
-    ['diametr-nozhiv', 'Діаметр ножів'],
-    ['diametr-lopatey', 'Діаметр лопатей'],
-    ['diametr-shtangy', 'Діаметр штанги'],
-    ['diametr-shlifuvalnoyi-platformy', 'Діаметр шліфувальної платформи'],
-    ['diametr-sverdlinnya', 'Діаметр свердління'],
-    ['diametr-sverdlinnya-v-betoni', 'Діаметр свердління в бетоні'],
-    ['diametr-sverlinnya-v-betoni', 'Діаметр сверління в бетоні'],
-    ['glybyna-obrobky', 'Глибина обробки'],
-    ['maksymalna-syla-vsmoktuvannya', 'Максимальна сила всмоктування'],
-    ['maksymalnyy-potik-povitrya', 'Максимальний потік повітря'],
-    ['maksymalnyy-diametr-gilok', 'Максимальний діаметр гілок'],
-    ['maksymalnyy-diametr-rizannya', 'Максимальний діаметр різання'],
-    ['maksymalnyy-diametr-sverdlinnya-derevo', 'Максимальний діаметр свердління (дерево)'],
-    ['maksymalnyy-diametr-sverdlinnya-metal', 'Максимальний діаметр свердління (метал)'],
+    ['diametr', 'Діаметр'],
+    ['gabaryty', 'Габарити'],
     ['maksymalnyy-krutnyy-moment', 'Максимальний крутний момент'],
-    ['kilkist-rezhymiv', 'Кількість режимів'],
-    ['kilkist-rezhymiv-zusyllya', 'Кількість режимів зусилля'],
     ['kilkist-shvydkostey', 'Кількість швидкостей'],
-    ['kilkist-udariv', 'Кількість ударів'],
-    ['kilkist-svitlodiodiv', 'Кількість світлодіодів'],
-    ['dvygun', 'Двигун'],
-    ['oberty', 'Оберти'],
-    ['patron', 'Патрон'],
-    ['typ', 'Тип'],
-    ['funktsiyi', 'Функції'],
-    ['funktsiya-udaru', 'Функція удару'],
-    ['funktsiya-pulse', 'Функція Pulse'],
-    ['zakhyst-vid-zvorotnogo-udaru-kickback-control', 'Захист від зворотного удару (Kickback Control)'],
-    ['vantazhopidyomnist', 'Вантажопідйомність']
+    ['revers', 'Реверс'],
+    ['plavnyy-pusk', 'Плавний пуск']
 ]);
 
 const PARAMETER_SYNONYMS = new Map([
-    ['dvygun', 'typ-dvyguna'],
-    ['typ-dvyguna', 'typ-dvyguna'],
-    ['typ-motoru', 'typ-dvyguna'],
-    ['motor', 'typ-dvyguna'],
-
-    ['napruga', 'napruga'],
-    ['napruga-akumulyatora', 'napruga'],
-    ['nominalna-napruga', 'napruga'],
-    ['robocha-napruga', 'napruga'],
-
-    ['yemnist-akumulyatora', 'yemnist-akumulyatora'],
-    ['yemkist-akumulyatora', 'yemnist-akumulyatora'],
-    ['emnist-akumulyatora', 'yemnist-akumulyatora'],
-    ['battery-capacity', 'yemnist-akumulyatora'],
-
-    ['krutnyy-moment', 'maksymalnyy-krutnyy-moment'],
-    ['moment-krutinnya', 'maksymalnyy-krutnyy-moment'],
-    ['maks-krutnyy-moment', 'maksymalnyy-krutnyy-moment'],
-    ['maksymalnyy-krutnyy-moment', 'maksymalnyy-krutnyy-moment'],
-
-    ['oberty', 'kilkist-obertiv'],
-    ['kilkist-obertiv', 'kilkist-obertiv'],
-    ['oberty-holostogo-hodu', 'kilkist-obertiv-kholostogo-khodu'],
-    ['kilkist-obertiv-kholostogo-khodu', 'kilkist-obertiv-kholostogo-khodu'],
-
-    ['vaga', 'vaga'],
-    ['vaga-netto', 'vaga'],
-    ['vaga-brutto', 'vaga'],
+    ['potuzhnist-dvyguna', 'potuzhnist'],
+    ['power', 'potuzhnist'],
+    ['moshchnost', 'potuzhnist'],
+    ['maksymalnyj-tysk', 'robochyy-tysk'],
+    ['robochyj-tysk', 'robochyy-tysk'],
+    ['davlenie', 'robochyy-tysk'],
+    ['proizvoditelnost', 'produktyvnist'],
+    ['yemnist-baka', 'obyem-baka'],
+    ['emkost', 'obyem-baka'],
+    ['ves', 'vaga'],
     ['weight', 'vaga'],
-
-    ['diametr-dyska', 'diametr-dyska'],
-    ['diametr-dysku', 'diametr-dyska'],
-    ['diametr-patrona', 'diametr-patrona'],
-    ['diametr-sverdlinnya', null],
-
-    ['shvydkist', 'shvydkist-obertannya'],
-    ['shvydkist-obertannya', 'shvydkist-obertannya'],
-    ['regulyuvannya-shvydkosti', 'regulyuvannya-shvydkosti'],
-
-    ['revers', 'nayavnist-reversu'],
-    ['nayavnist-reversu', 'nayavnist-reversu'],
-    ['funktsiya-udaru', 'funktsiya-udaru'],
-    ['udar', 'funktsiya-udaru'],
-
-    ['aksesuary', null],
-    ['komplektatsiya', null],
-    ['garantiya', null],
-    ['instruktsiya', null]
+    ['kilkist-obertiv', 'oberty'],
+    ['chastota-obertannya', 'oberty'],
+    ['gabaryty-upakovky', 'gabaryty'],
+    ['razmery', 'gabaryty']
 ]);
+
+// === ДОПОМІЖНІ ФУНКЦІЇ ===
+
+function decodeHtmlEntitiesBasic(value) {
+    const raw = String(value ?? '');
+    return raw
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&times;/g, '×')
+        .replace(/&deg;/g, '°')
+        .replace(/&middot;/g, '·')
+        .replace(/&mdash;/g, '—')
+        .replace(/&ndash;/g, '–')
+        .replace(/&rsquo;/g, "'")
+        .replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"')
+        .replace(/&ldquo;/g, '"')
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&apos;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#34;/g, '"')
+        .replace(/&#(\d+);/g, (m, n) => {
+            const codePoint = Number(n);
+            if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return m;
+            try { return String.fromCodePoint(codePoint); } catch { return m; }
+        });
+}
 
 const normalizeTextValue = (value) => {
     const raw = String(value ?? '');
-    const cleaned = raw
+    return raw
         .replace(/&nbsp;/g, ' ')
+        .replace(/&times;/g, '×')
+        .replace(/&deg;/g, '°')
         .replace(/&middot;/g, ' ')
         .replace(/&mdash;/g, '—')
         .replace(/&ndash;/g, '–')
@@ -169,80 +186,45 @@ const normalizeTextValue = (value) => {
         .replace(/&gt;/g, '>')
         .replace(/\s+/g, ' ')
         .trim();
-
-    const withoutTrailingComment = cleaned.replace(
-        /\s*[–—-]\s*[^0-9a-zа-яіїєё%°"'\)\]]{0,3}.*$/iu,
-        (match) => match
-    );
-    if (!withoutTrailingComment) return cleaned;
-    return cleaned;
 };
 
 const isGarbageValue = (value) => {
     const text = String(value ?? '').trim();
     if (!text) return true;
-    if (text.length < 1) return true;
-    if (text.length > 255) return true;
+    if (text.length < 1 || text.length > 255) return true;
     if (/^\d{18,}$/.test(text)) return true;
     return false;
 };
 
-function extractParamsFromHtml(html) {
-    const params = [];
-    if (!html) return params;
+function toArray(value) {
+    if (!value) return [];
+    return Array.isArray(value) ? value : [value];
+}
 
-    const liRegex = /<li[^>]*>([\s\S]*?)<\/li>/gi;
-    let match = null;
+function extractNumberFromText(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return 0;
+    const match = text.match(/-?\d+(?:[.,]\d+)?/);
+    if (!match) return 0;
+    const normalized = String(match[0]).replace(',', '.');
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
 
-    while ((match = liRegex.exec(html)) !== null) {
-        let content = match[1].replace(/<[^>]+>/g, '').trim();
-        content = content.replace(/&nbsp;/g, ' ').replace(/&middot;/g, '').replace(/\s+/g, ' ');
-
-        const separatorIndex = content.indexOf(':');
-        if (separatorIndex > 0) {
-            const name = content.substring(0, separatorIndex).trim();
-            const value = content.substring(separatorIndex + 1).trim();
-            if (name && value) params.push({ name, value });
-        }
-    }
-
-    return params;
+function normalizeAvailability(value) {
+    const text = String(value ?? '').toLowerCase().trim();
+    if (!text) return 'true';
+    if (['in stock', 'in_stock', 'instock', 'preorder', 'backorder'].includes(text)) return 'true';
+    if (['out of stock', 'out_of_stock', 'outofstock', 'sold out', 'sold_out'].includes(text)) return 'false';
+    return 'true';
 }
 
 function canonicalizeParameterNameToSlug(parameterName) {
     const rawSlug = generateFilterSlug(parameterName);
-    const mapped = PARAMETER_SYNONYMS.has(rawSlug) ? PARAMETER_SYNONYMS.get(rawSlug) : rawSlug;
+    const mapped = PARAMETER_SYNONYMS.get(rawSlug) || rawSlug;
     if (!mapped) return null;
     if (!ALLOWED_PARAMETER_BASES.has(mapped)) return null;
     return mapped;
-}
-
-function splitMultiNumericWithUnit(value) {
-    const text = String(value ?? '').trim();
-    if (!text) return [];
-    if (!/[\/;]/.test(text)) return [text];
-
-    const unitMatch = text.match(/[^\d\s.,\/;]+$/u);
-    const unit = unitMatch ? unitMatch[0] : '';
-    const numbers = text.match(/\d+(?:[.,]\d+)?/g) || [];
-
-    if (!unit) return [text];
-    if (numbers.length < 2) return [text];
-    if (!/^[\d\s.,\/;]+[^\d\s.,\/;]+$/u.test(text)) return [text];
-
-    const unique = [];
-    const seen = new Set();
-
-    for (const rawNumber of numbers) {
-        const normalizedNumber = String(rawNumber).replace(',', '.').trim();
-        const item = `${normalizedNumber}${unit}`.replace(/\s+/g, ' ').trim();
-        const key = item.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        unique.push(item);
-    }
-
-    return unique.length > 0 ? unique : [text];
 }
 
 function buildParameterEntriesFromNameValue(parameterName, parameterValue) {
@@ -255,34 +237,25 @@ function buildParameterEntriesFromNameValue(parameterName, parameterValue) {
     const normalizedValue = normalizeTextValue(parameterValue);
     if (isGarbageValue(normalizedValue)) return [];
 
-    const valueCandidates = splitMultiNumericWithUnit(normalizedValue);
+    return [{
+        canonicalSlug,
+        parameter_name: canonicalName,
+        parameter_value: normalizedValue.substring(0, 255),
+        slug: generateFilterSlug(canonicalName),
+        param_value_slug: generateFilterSlug(normalizedValue)
+    }];
+}
 
-    const result = [];
-    for (const candidate of valueCandidates) {
-        const valueText = normalizeTextValue(candidate);
-        if (isGarbageValue(valueText)) continue;
-
-        result.push({
-            canonicalSlug,
-            parameter_name: canonicalName,
-            parameter_value: valueText.substring(0, 255),
-            slug: generateFilterSlug(canonicalName),
-            param_value_slug: generateFilterSlug(valueText)
-        });
-    }
-
-    return result;
+function buildUniqueProductSlug(productName, supplierPrefix, xmlId) {
+    const baseSlug = generateSlug(productName);
+    const suffixSlug = generateFilterSlug(`${supplierPrefix}-${xmlId}`);
+    const combined = `${baseSlug}-${suffixSlug}`.replace(/-+/g, '-').trim();
+    return combined.length > 500 ? combined.slice(0, 500) : combined;
 }
 
 async function getSupplierPrefixes() {
-    const sources = await ImportSource.findAll({
-        attributes: ['supplier_prefix'],
-        raw: true
-    });
-
-    const prefixes = sources
-        .map(s => String(s.supplier_prefix || '').trim().toUpperCase())
-        .filter(Boolean);
+    const sources = await ImportSource.findAll({ attributes: ['supplier_prefix'], raw: true });
+    const prefixes = sources.map(s => String(s.supplier_prefix || '').trim().toUpperCase()).filter(Boolean);
 
     if (prefixes.length > 0) return Array.from(new Set(prefixes));
 
@@ -293,51 +266,157 @@ async function getSupplierPrefixes() {
         raw: true
     });
 
-    return Array.from(
-        new Set(
-            products
-                .map(p => String(p.supplier_prefix || '').trim().toUpperCase())
-                .filter(Boolean)
-        )
-    );
+    return Array.from(new Set(
+        products.map(p => String(p.supplier_prefix || '').trim().toUpperCase()).filter(Boolean)
+    ));
 }
 
-class ImportService {
-    static async importFromFeed(url, options) {
-        const effectiveOptions = options || {};
-        console.log(`📥 Завантаження XML з ${url}...`);
+// === ПАРСЕРИ RSS (Google Shopping) ===
 
+function pickExternalCategoryIdFromRssItem(item) {
+    const productType = item?.['g:product_type'] || item?.product_type;
+    if (productType) {
+        // "Home &gt; Компресори &gt; Компресорні блоки" → "Компресорні блоки"
+        const decoded = decodeHtmlEntitiesBasic(String(productType).trim());
+        const parts = decoded.split(/\s*>\s*/);
+        return parts[parts.length - 1] || decoded;
+    }
+
+    const googleCategory = item?.['g:google_product_category'] || item?.google_product_category;
+    if (googleCategory) return decodeHtmlEntitiesBasic(String(googleCategory).trim());
+
+    return 'uncategorized';
+}
+
+function extractCustomParamsFromRssItem(item) {
+    const params = [];
+    if (!item || typeof item !== 'object') return params;
+
+    for (const [key, value] of Object.entries(item)) {
+        // Пропускаємо стандартні теги
+        if (IGNORED_RSS_TAGS.has(key)) continue;
+        if (key.startsWith('g:')) continue;
+        if (!value) continue;
+
+        const valueStr = String(value).trim();
+        if (!valueStr || valueStr === 'no') continue;
+
+        // Перетворюємо kebab-case в читабельну назву
+        const tagSlug = key.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+        const mappedName = RSS_TAG_TO_PARAM_MAP[tagSlug];
+
+        if (mappedName) {
+            params.push({ name: mappedName, value: valueStr });
+        }
+    }
+
+    return params;
+}
+
+function buildOfferFromRssItem(item, filterLanguage = 'UA') {
+    // Фільтруємо по мові
+    const lang = item?.Language || item?.language || '';
+    if (filterLanguage && lang && String(lang).toUpperCase() !== filterLanguage.toUpperCase()) {
+        return null;
+    }
+
+    const xmlId = item?.['g:id'] || item?.id || '';
+    const externalCategoryId = pickExternalCategoryIdFromRssItem(item);
+
+    const title = decodeHtmlEntitiesBasic(item?.['g:title'] || item?.title || '');
+    const description = decodeHtmlEntitiesBasic(item?.['g:description'] || item?.description || '');
+
+    // Бренд з Vendor тега
+    const brand = decodeHtmlEntitiesBasic(item?.Vendor || item?.vendor || item?.['g:brand'] || item?.brand || '');
+
+    // Ціни: g:price = актуальна ціна, price-regular = стара ціна
+    const currentPrice = item?.['g:price'] || item?.price || '';
+    const regularPrice = item?.['price-regular'] || item?.oldprice || '';
+
+    const availabilityText = item?.['g:availability'] || item?.availability || '';
+
+    // Картинки
+    const pictures = [];
+    const imageMain = item?.['g:image_link'] || item?.image_link;
+    const additionalImages = item?.['g:additional_image_link'] || item?.additional_image_link;
+
+    for (const url of toArray(imageMain)) {
+        const u = decodeHtmlEntitiesBasic(String(url ?? '').trim());
+        if (u) pictures.push(u);
+    }
+    for (const url of toArray(additionalImages)) {
+        const u = decodeHtmlEntitiesBasic(String(url ?? '').trim());
+        if (u) pictures.push(u);
+    }
+
+    // Кастомні параметри з тегів
+    const customParams = extractCustomParamsFromRssItem(item);
+
+    return {
+        id: decodeHtmlEntitiesBasic(String(xmlId ?? '').trim()),
+        categoryId: externalCategoryId,
+        name: title,
+        title: title,
+        description: description,
+        vendor: brand,
+        brand: brand,
+        price: String(currentPrice).trim(),
+        oldprice: String(regularPrice).trim(),
+        available: normalizeAvailability(availabilityText),
+        picture: pictures,
+        param: customParams,
+        _rawItem: item // Зберігаємо для парсингу параметрів
+    };
+}
+
+// === ОСНОВНИЙ КЛАС ===
+
+class ImportService {
+    static async importFromFeed(url, options = {}) {
+        console.log(`📥 Завантаження XML з ${url}...`);
         const response = await axios.get(url, {
             timeout: 300000,
             maxContentLength: 100 * 1024 * 1024
         });
-
-        return this.processXML(response.data, effectiveOptions);
+        return this.processXML(response.data, options);
     }
 
-    static async importFromFile(filePath, options) {
-        const effectiveOptions = options || {};
+    static async importFromFile(filePath, options = {}) {
         const xmlData = fs.readFileSync(filePath, 'utf-8');
-        return this.processXML(xmlData, effectiveOptions);
+        return this.processXML(xmlData, options);
     }
 
-    static async processXML(xmlData, options) {
-        const effectiveOptions = options || {};
-        const supplierPrefix = String(effectiveOptions.supplierPrefix || 'DEFAULT').toUpperCase().trim() || 'DEFAULT';
+    static async processXML(xmlData, options = {}) {
+        const supplierPrefix = String(options.supplierPrefix || 'DEFAULT').toUpperCase().trim() || 'DEFAULT';
+        const filterLanguage = options.filterLanguage || 'UA'; // За замовчуванням тільки українська
 
         const parser = new xml2js.Parser({
             explicitArray: false,
-            mergeAttrs: true
+            mergeAttrs: true,
+            tagNameProcessors: [], // Залишаємо теги як є
+            attrNameProcessors: []
         });
 
         const result = await parser.parseStringPromise(xmlData);
-        const root = result.yml_catalog || result.price || result;
-        const shop = root.shop || root;
 
-        const rawCategories = this._extractCategories(shop);
+        const isRss = Boolean(result?.rss?.channel);
+        const root = isRss ? result.rss : (result.yml_catalog || result.price || result);
+        const shop = isRss ? result.rss.channel : (root.shop || root);
+
+        console.log(`📄 Формат: ${isRss ? 'RSS/Google Shopping' : 'YML'}`);
+
+        const rawCategories = isRss
+            ? this._extractCategoriesFromRss(shop)
+            : this._extractCategories(shop);
+
         const mappingResult = await mapCategoriesFromXML(supplierPrefix, rawCategories);
 
-        const rawProducts = this._extractProducts(shop);
+        const rawProducts = isRss
+            ? this._extractProductsFromRss(shop, filterLanguage)
+            : this._extractProducts(shop);
+
+        console.log(`📦 Знайдено товарів: ${rawProducts.length}`);
+
         const importStats = await this._importProducts(rawProducts, supplierPrefix);
 
         const affectedCategories = await this._getAffectedCategories(supplierPrefix);
@@ -349,29 +428,75 @@ class ImportService {
             supplier: supplierPrefix,
             categories: {
                 total: rawCategories.length,
-                mapped: mappingResult.mapped.length,
-                existing: mappingResult.existing.length,
-                unmapped: mappingResult.unmapped.length,
-                unmappedList: mappingResult.unmapped
+                mapped: mappingResult.mapped?.length || 0,
+                existing: mappingResult.existing?.length || 0,
+                unmapped: mappingResult.unmapped?.length || 0,
+                unmappedList: mappingResult.unmapped || []
             },
             products: importStats,
             filtersUpdated: affectedCategories.length
         };
     }
 
+    static _extractCategoriesFromRss(channel) {
+        const categoriesMap = new Map();
+        const itemsRaw = channel?.item || [];
+        const items = Array.isArray(itemsRaw) ? itemsRaw : [itemsRaw];
+
+        for (const item of items) {
+            if (!item) continue;
+
+            // Пропускаємо російські товари
+            const lang = item?.Language || item?.language || '';
+            if (lang && String(lang).toUpperCase() === 'RU') continue;
+
+            const externalCategoryId = pickExternalCategoryIdFromRssItem(item);
+            const key = String(externalCategoryId).trim();
+            if (!key) continue;
+
+            if (!categoriesMap.has(key)) {
+                categoriesMap.set(key, {
+                    id: key,
+                    name: key,
+                    parentId: null
+                });
+            }
+        }
+
+        if (categoriesMap.size === 0) {
+            categoriesMap.set('uncategorized', { id: 'uncategorized', name: 'uncategorized', parentId: null });
+        }
+
+        console.log(`📂 Категорії з RSS: ${Array.from(categoriesMap.keys()).join(', ')}`);
+        return Array.from(categoriesMap.values());
+    }
+
+    static _extractProductsFromRss(channel, filterLanguage = 'UA') {
+        const itemsRaw = channel?.item || [];
+        const items = Array.isArray(itemsRaw) ? itemsRaw : [itemsRaw];
+
+        const offers = [];
+        for (const item of items) {
+            if (!item) continue;
+            const offer = buildOfferFromRssItem(item, filterLanguage);
+            if (!offer || !offer.id) continue;
+            offers.push(offer);
+        }
+
+        return offers;
+    }
+
     static _extractCategories(shop) {
         const categories = [];
-        const rawCats = shop && shop.categories && shop.categories.category ? shop.categories.category : [];
+        const rawCats = shop?.categories?.category || [];
         const catsArray = Array.isArray(rawCats) ? rawCats : [rawCats];
 
-        catsArray.forEach((cat) => {
-            if (!cat) return;
-            if (typeof cat === 'string') return;
+        for (const cat of catsArray) {
+            if (!cat || typeof cat === 'string') continue;
 
-            const id = cat.id || (cat.$ && cat.$.id) || (cat._attributes && cat._attributes.id);
+            const id = cat.id || cat.$?.id || cat._attributes?.id;
             const name = cat._ || cat['#text'] || cat.name;
-            const parentId =
-                cat.parentId || (cat.$ && cat.$.parentId) || (cat._attributes && cat._attributes.parentId) || null;
+            const parentId = cat.parentId || cat.$?.parentId || cat._attributes?.parentId || null;
 
             if (id && name && typeof name === 'string') {
                 categories.push({
@@ -380,70 +505,50 @@ class ImportService {
                     parentId: parentId ? String(parentId) : null
                 });
             }
-        });
+        }
 
         return categories;
     }
 
     static _extractProducts(shop) {
-        const offers = shop && shop.offers && shop.offers.offer ? shop.offers.offer : [];
+        const offers = shop?.offers?.offer || [];
         return Array.isArray(offers) ? offers : [offers];
     }
 
     static async _importProducts(products, supplierPrefix) {
-        const stats = {
-            total: products.length,
-            created: 0,
-            updated: 0,
-            skipped: 0,
-            errors: []
-        };
+        const stats = { total: products.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
         for (const offer of products) {
             try {
-                const externalId = offer && (offer.id || (offer.$ && offer.$.id));
-                const categoryId = offer && (offer.categoryId || offer.category_id);
+                const externalId = offer?.id || offer?.$?.id;
+                const categoryId = offer?.categoryId || offer?.category_id;
 
-                if (!externalId) {
-                    stats.skipped += 1;
-                    continue;
-                }
+                if (!externalId) { stats.skipped++; continue; }
 
-                const hasName = offer && (offer.name || offer.model || offer.title);
-                if (!hasName) {
-                    stats.skipped += 1;
-                    continue;
-                }
+                const hasName = offer?.name || offer?.model || offer?.title;
+                if (!hasName) { stats.skipped++; continue; }
 
                 let internalCategoryId = null;
                 if (categoryId) {
                     internalCategoryId = await getInternalCategoryForProduct(supplierPrefix, String(categoryId));
                 }
 
-                if (!internalCategoryId) {
-                    stats.skipped += 1;
-                    continue;
-                }
+                if (!internalCategoryId) { stats.skipped++; continue; }
 
                 const productData = this._parseProduct(offer, supplierPrefix, internalCategoryId);
                 const productId = `${supplierPrefix}_${externalId}`;
 
-                const upsertResult = await Product.upsert({
-                    product_id: productId,
-                    ...productData
-                });
+                const [, created] = await Product.upsert({ product_id: productId, ...productData });
 
-                const created = Array.isArray(upsertResult) ? Boolean(upsertResult[1]) : false;
-
-                if (created) stats.created += 1;
-                else stats.updated += 1;
+                if (created) stats.created++;
+                else stats.updated++;
 
                 await this._saveParameters(productId, offer);
                 await this._savePictures(productId, offer);
             } catch (error) {
                 stats.errors.push({
-                    productId: offer && offer.id ? String(offer.id) : 'unknown',
-                    error: error && error.message ? String(error.message) : 'unknown error'
+                    productId: offer?.id || 'unknown',
+                    error: error?.message || 'unknown error'
                 });
             }
         }
@@ -452,42 +557,40 @@ class ImportService {
     }
 
     static _parseProduct(offer, supplierPrefix, internalCategoryId) {
-        const name =
-            offer.name ||
-            offer.model ||
-            offer.title ||
-            offer._ ||
-            `${offer.typePrefix || ''} ${offer.vendor || ''} ${offer.model || ''}`.trim() ||
-            `Product_${offer.id || (offer.$ && offer.$.id) || 'unknown'}`;
+        const xmlId = String(offer.id || offer.$?.id || '');
+        const name = offer.name || offer.model || offer.title || `Product_${xmlId || 'unknown'}`;
 
-        const price = parseFloat(offer.price) || 0;
-        const oldPrice = parseFloat(offer.oldprice || offer.price_old || offer.old_price) || null;
+        // g:price = актуальна ціна (можливо зі знижкою)
+        // price-regular / oldprice = стара ціна (без знижки)
+        const currentPrice = extractNumberFromText(offer.price);
+        const regularPrice = offer.oldprice ? extractNumberFromText(offer.oldprice) : null;
 
         let rawBrand = offer.vendor || offer.brand || '';
+        const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
 
-        if (!rawBrand && offer.param) {
-            const params = Array.isArray(offer.param) ? offer.param : [offer.param];
-            const brandParam = params.find((p) => {
-                const paramName = String((p && (p.name || (p.$ && p.$.name))) || '').toLowerCase();
-                return paramName.includes('бренд') || paramName.includes('виробник') || paramName.includes('производитель');
-            });
-            if (brandParam) {
-                rawBrand = brandParam._ || brandParam.value || brandParam['#text'] || '';
-            }
+        // Визначаємо що є що
+        let finalPrice, finalSalePrice, discount;
+
+        if (regularPrice && regularPrice > currentPrice) {
+            // Є стара ціна і вона більша за актуальну = є знижка
+            finalPrice = regularPrice;      // Стара ціна як основна
+            finalSalePrice = currentPrice;  // Актуальна як sale_price
+            discount = Math.round((1 - currentPrice / regularPrice) * 100);
+        } else {
+            // Немає знижки або дані некоректні
+            finalPrice = currentPrice;
+            finalSalePrice = 0;
+            discount = 0;
         }
 
-        const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
-        const discount = oldPrice && oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
-        const finalName = name || `Product_${offer.id || 'unknown'}`;
-
         return {
-            xml_id: String(offer.id || (offer.$ && offer.$.id) || ''),
+            xml_id: xmlId,
             supplier_prefix: supplierPrefix,
-            product_name: finalName,
-            slug: generateSlug(finalName),
+            product_name: name,
+            slug: buildUniqueProductSlug(name, supplierPrefix, xmlId),
             product_description: offer.description || '',
-            price: price,
-            sale_price: oldPrice || 0,
+            price: finalPrice,              // Основна ціна (без знижки)
+            sale_price: finalSalePrice,     // Ціна зі знижкою (менша)
             discount: discount,
             brand: brand,
             available: offer.available !== 'false' ? 'true' : 'false',
@@ -498,81 +601,85 @@ class ImportService {
         };
     }
 
+    // static _parseProduct(offer, supplierPrefix, internalCategoryId) {
+    //     const xmlId = String(offer.id || offer.$?.id || '');
+    //     const name = offer.name || offer.model || offer.title || `Product_${xmlId || 'unknown'}`;
+    //
+    //     const price = extractNumberFromText(offer.price);
+    //     const oldPrice = offer.oldprice ? extractNumberFromText(offer.oldprice) : null;
+    //
+    //     let rawBrand = offer.vendor || offer.brand || '';
+    //     const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
+    //
+    //     // Знижка: якщо oldPrice > price
+    //     const discount = oldPrice && oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
+    //
+    //     return {
+    //         xml_id: xmlId,
+    //         supplier_prefix: supplierPrefix,
+    //         product_name: name,
+    //         slug: buildUniqueProductSlug(name, supplierPrefix, xmlId),
+    //         product_description: offer.description || '',
+    //         price: price,
+    //         sale_price: oldPrice || 0,
+    //         discount: discount,
+    //         brand: brand,
+    //         available: offer.available !== 'false' ? 'true' : 'false',
+    //         sub_category_id: internalCategoryId,
+    //         sale: discount > 0 ? 'true' : 'false',
+    //         bestseller: 'false',
+    //         custom_product: false
+    //     };
+    // }
+
     static async _saveParameters(productId, offer) {
         try {
             await Parameter.destroy({ where: { product_id: productId } });
 
             const finalParamsByKey = new Map();
 
-            const offerParams = offer.param || [];
-            const offerParamsArray = Array.isArray(offerParams) ? offerParams : [offerParams];
-
-            for (const param of offerParamsArray) {
+            // 1. Спочатку параметри з offer.param (для YML або кастомні з RSS)
+            const offerParams = toArray(offer.param);
+            for (const param of offerParams) {
                 if (!param) continue;
 
-                const nameRaw = param.name || (param.$ && param.$.name) || '';
+                const nameRaw = param.name || param.$?.name || '';
                 const valueRaw = param._ || param.value || param['#text'] || '';
-
                 const nameString = String(nameRaw ?? '').trim();
                 if (!nameString) continue;
 
                 const entries = buildParameterEntriesFromNameValue(nameString, valueRaw);
-                if (entries.length === 0) continue;
-
                 for (const entry of entries) {
                     const key = `${entry.canonicalSlug}::${entry.param_value_slug}`;
-                    finalParamsByKey.set(key, {
-                        parameter_name: entry.parameter_name,
-                        parameter_value: entry.parameter_value,
-                        slug: entry.slug,
-                        param_value_slug: entry.param_value_slug
-                    });
+                    finalParamsByKey.set(key, entry);
                 }
             }
 
-            if (finalParamsByKey.size === 0) {
-                const extracted = parseDescriptionSpecs(offer.description || '');
-
-                for (const item of extracted) {
-                    const nameString = String(item.name ?? '').trim();
-                    if (!nameString) continue;
-
-                    const entries = buildParameterEntriesFromNameValue(nameString, item.value);
-                    if (entries.length === 0) continue;
-
+            // 2. Якщо є _rawItem (RSS), парсимо кастомні теги
+            if (offer._rawItem && finalParamsByKey.size === 0) {
+                const customParams = extractCustomParamsFromRssItem(offer._rawItem);
+                for (const param of customParams) {
+                    const entries = buildParameterEntriesFromNameValue(param.name, param.value);
                     for (const entry of entries) {
                         const key = `${entry.canonicalSlug}::${entry.param_value_slug}`;
-                        finalParamsByKey.set(key, {
-                            parameter_name: entry.parameter_name,
-                            parameter_value: entry.parameter_value,
-                            slug: entry.slug,
-                            param_value_slug: entry.param_value_slug
-                        });
-                    }
-                }
-
-                if (finalParamsByKey.size === 0) {
-                    const extractedLegacy = extractParamsFromHtml(offer.description || '');
-                    for (const item of extractedLegacy) {
-                        const nameString = String(item.name ?? '').trim();
-                        if (!nameString) continue;
-
-                        const entries = buildParameterEntriesFromNameValue(nameString, item.value);
-                        if (entries.length === 0) continue;
-
-                        for (const entry of entries) {
-                            const key = `${entry.canonicalSlug}::${entry.param_value_slug}`;
-                            finalParamsByKey.set(key, {
-                                parameter_name: entry.parameter_name,
-                                parameter_value: entry.parameter_value,
-                                slug: entry.slug,
-                                param_value_slug: entry.param_value_slug
-                            });
-                        }
+                        finalParamsByKey.set(key, entry);
                     }
                 }
             }
 
+            // 3. Якщо все ще пусто - парсимо з description
+            if (finalParamsByKey.size === 0) {
+                const extracted = parseDescriptionSpecs(offer.description || '');
+                for (const item of extracted) {
+                    const entries = buildParameterEntriesFromNameValue(item.name, item.value);
+                    for (const entry of entries) {
+                        const key = `${entry.canonicalSlug}::${entry.param_value_slug}`;
+                        finalParamsByKey.set(key, entry);
+                    }
+                }
+            }
+
+            // Зберігаємо
             for (const entry of finalParamsByKey.values()) {
                 await Parameter.create({
                     product_id: productId,
@@ -583,6 +690,7 @@ class ImportService {
                 });
             }
         } catch (e) {
+            console.error('Error saving parameters:', e.message);
         }
     }
 
@@ -590,22 +698,16 @@ class ImportService {
         try {
             await Picture.destroy({ where: { product_id: productId } });
 
-            const pictures = offer.picture || [];
-            const picsArray = Array.isArray(pictures) ? pictures : [pictures];
-
-            for (const pic of picsArray) {
+            const pictures = toArray(offer.picture);
+            for (const pic of pictures) {
                 if (!pic) continue;
-
                 const url = typeof pic === 'string' ? pic : pic._ || pic.url || pic['#text'];
-
                 if (url) {
-                    await Picture.create({
-                        product_id: productId,
-                        pictures_name: url
-                    });
+                    await Picture.create({ product_id: productId, pictures_name: url });
                 }
             }
         } catch (e) {
+            console.error('Error saving pictures:', e.message);
         }
     }
 
@@ -623,10 +725,7 @@ class ImportService {
             raw: true
         });
 
-        const ids = supplierProducts
-            .map(r => String(r.sub_category_id || '').trim())
-            .filter(Boolean);
-
+        const ids = supplierProducts.map(r => String(r.sub_category_id || '').trim()).filter(Boolean);
         if (ids.length === 0) return [];
 
         const internalIds = ids.filter(id => {

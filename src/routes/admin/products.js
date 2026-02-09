@@ -1,63 +1,28 @@
 const express = require('express');
 const router = express.Router();
-const { Op, Sequelize } = require('sequelize');
-const { Product, Picture, Parameter, SubCategory, Category } = require('../../db');
+const { Op } = require('sequelize');
+const { Product, Picture, Parameter, SubCategory, Category, Order } = require('../../db');
 const cache = require('../../utils/cache');
 
-const LIST_ATTRS = [
-    'product_id', 'slug', 'product_name', 'brand',
-    'price', 'sale_price', 'discount', 'available',
-    'bestseller', 'sale', 'sub_category_id', 'custom_product',
-    'createdAt', 'updatedAt'
-];
-
-function parsePageLimit(query) {
-    const pageRaw = typeof query.page === 'string' ? query.page : '';
-    const limitRaw = typeof query.limit === 'string' ? query.limit : '';
-    const page = Math.max(parseInt(pageRaw || '1', 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(limitRaw || '20', 10) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-    return { page, limit, offset };
-}
-
-function normalizeBrands(brandQueryValue) {
-    if (!brandQueryValue) return null;
-
-    if (Array.isArray(brandQueryValue)) {
-        const value = brandQueryValue.map(String).map(s => s.trim()).filter(Boolean);
-        return value.length > 0 ? value : null;
-    }
-
-    const asString = String(brandQueryValue);
-    const value = asString.split(',').map(s => s.trim()).filter(Boolean);
-    return value.length > 0 ? value : null;
-}
-
-function parseNumberOrNull(value) {
-    if (value === null || value === undefined) return null;
-    const parsed = Number.parseFloat(String(value));
-    if (Number.isNaN(parsed)) return null;
-    return parsed;
-}
-
-// GET /admin/products
+// GET all products
 router.get('/', async (req, res) => {
     try {
-        const { page, limit, offset } = parsePageLimit(req.query);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
 
-        const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-        const subCategory = typeof req.query.sub_category === 'string' ? req.query.sub_category.trim() : '';
-        const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
-        const sale = typeof req.query.sale === 'string' ? req.query.sale : '';
-        const bestseller = typeof req.query.bestseller === 'string' ? req.query.bestseller : '';
-        const available = typeof req.query.available === 'string' ? req.query.available : '';
-        const sort = typeof req.query.sort === 'string' ? req.query.sort : '';
-        const priceMin = parseNumberOrNull(req.query.price_min);
-        const priceMax = parseNumberOrNull(req.query.price_max);
-        const brands = normalizeBrands(req.query.brand);
+        const search = req.query.search || '';
+        const category = req.query.category || '';
+        const sub_category = req.query.sub_category || '';
+        const brand = req.query.brand || '';
+        const available = req.query.available || '';
+        const sale = req.query.sale || '';
+        const bestseller = req.query.bestseller || '';
+        const sort = req.query.sort || 'newest';
 
         const where = {};
 
+        // Пошук
         if (search) {
             where[Op.or] = [
                 { product_name: { [Op.iLike]: `%${search}%` } },
@@ -66,63 +31,58 @@ router.get('/', async (req, res) => {
             ];
         }
 
-        if (subCategory) {
-            where.sub_category_id = subCategory;
+        // Фільтр по бренду
+        if (brand) {
+            where.brand = brand;
+        }
+
+        // Фільтр по категорії
+        if (sub_category) {
+            where.sub_category_id = sub_category;
         } else if (category) {
             const subCats = await SubCategory.findAll({
-                where: { category_id: category },
+                where: { parent_id: category },
                 attributes: ['sub_category_id'],
                 raw: true
             });
-            const ids = subCats.map(sc => sc.sub_category_id).filter(Boolean);
-            where.sub_category_id = ids.length > 0 ? { [Op.in]: ids } : { [Op.in]: [] };
-        }
-
-        if (brands) {
-            where.brand = { [Op.in]: brands };
-        }
-
-        if (priceMin !== null || priceMax !== null) {
-            const andParts = [];
-
-            if (priceMin !== null) {
-                andParts.push(
-                    Sequelize.literal(`CAST(price AS DECIMAL) >= ${priceMin}`)
-                );
-            }
-            if (priceMax !== null) {
-                andParts.push(
-                    Sequelize.literal(`CAST(price AS DECIMAL) <= ${priceMax}`)
-                );
-            }
-
-            if (andParts.length > 0) {
-                where[Op.and] = andParts;
+            const ids = subCats.map(sc => sc.sub_category_id);
+            if (ids.length > 0) {
+                where.sub_category_id = { [Op.in]: ids };
             }
         }
 
+        if (available) where.available = available;
         if (sale === 'true') where.sale = 'true';
         if (bestseller === 'true') where.bestseller = 'true';
-        if (available === 'true') where.available = 'true';
-        if (available === 'false') where.available = 'false';
 
-        const sortMap = {
-            price_asc: [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-            price_desc: [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-            name_asc: [['product_name', 'ASC']],
-            newest: [['createdAt', 'DESC']]
-        };
-        const order = Object.prototype.hasOwnProperty.call(sortMap, sort) ? sortMap[sort] : [['createdAt', 'DESC']];
+        // Сортування
+        let order = [['createdAt', 'DESC']];
+        switch (sort) {
+            case 'price_asc':
+                order = [['price', 'ASC']];
+                break;
+            case 'price_desc':
+                order = [['price', 'DESC']];
+                break;
+            case 'name_asc':
+                order = [['product_name', 'ASC']];
+                break;
+            case 'newest':
+            default:
+                order = [['createdAt', 'DESC']];
+        }
 
         const { count, rows } = await Product.findAndCountAll({
             where,
-            attributes: LIST_ATTRS,
-            include: [{
-                model: Picture,
-                as: 'pictures',
-                attributes: ['pictures_name'],
-                limit: 1
-            }],
+            include: [
+                { model: Picture, as: 'pictures', attributes: ['id', 'pictures_name'] },
+                { model: Parameter, as: 'params' },
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
+                    include: [{ model: Category, as: 'category' }]
+                }
+            ],
             limit,
             offset,
             order,
@@ -131,23 +91,27 @@ router.get('/', async (req, res) => {
 
         res.json({
             products: rows,
-            pagination: { page, limit, total: count, pages: Math.ceil(count / limit) }
+            pagination: {
+                page,
+                limit,
+                total: count,
+                pages: Math.ceil(count / limit)
+            }
         });
     } catch (error) {
+        console.error('GET products error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// GET /admin/products/:id
+// GET single product
 router.get('/:id', async (req, res) => {
     try {
-        const { id } = req.params;
-
         const product = await Product.findOne({
             where: {
                 [Op.or]: [
-                    { product_id: id },
-                    { slug: id }
+                    { product_id: req.params.id },
+                    { slug: req.params.id }
                 ]
             },
             include: [
@@ -167,71 +131,139 @@ router.get('/:id', async (req, res) => {
 
         res.json({ product });
     } catch (error) {
+        console.error('GET product error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// POST /admin/products
+// POST create product
 router.post('/', async (req, res) => {
     try {
-        const data = req.body;
+        const { pictures, parameters, ...productData } = req.body;
 
-        if (!data.product_id) {
-            data.product_id = `CUSTOM_${Date.now()}`;
+        console.log('📥 Creating product with parameters:', parameters);
+
+        if (!productData.product_id) {
+            productData.product_id = `CUSTOM_${Date.now()}`;
         }
 
-        if (!data.slug && data.product_name) {
-            data.slug = String(data.product_name)
-                .toLowerCase()
-                .replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
-                .replace(/^-|-$/g, '');
+        if (!productData.slug && productData.product_name) {
+            productData.slug = String(productData.product_name)
+                    .toLowerCase()
+                    .replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+                    .replace(/^-|-$/g, '')
+                + '-' + productData.product_id.toLowerCase();
         }
 
-        data.custom_product = true;
+        productData.custom_product = true;
 
-        const product = await Product.create(data);
+        const product = await Product.create(productData);
+
+        // Додаємо фото
+        if (pictures && pictures.length > 0) {
+            await Picture.bulkCreate(pictures.map(url => ({
+                product_id: product.product_id,
+                pictures_name: url
+            })));
+        }
+
+        // Додаємо параметри
+        if (parameters && parameters.length > 0) {
+            await Parameter.bulkCreate(parameters.map(param => ({
+                product_id: product.product_id,
+                parameter_name: param.name,
+                parameter_value: param.value,
+                slug: param.name.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-'),
+                param_value_slug: param.value.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+            })));
+            console.log('✅ Parameters created:', parameters.length);
+        }
+
+        const fullProduct = await Product.findByPk(product.product_id, {
+            include: [
+                { model: Picture, as: 'pictures' },
+                { model: Parameter, as: 'params' },
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
+                    include: [{ model: Category, as: 'category' }]
+                }
+            ]
+        });
+
         await cache.invalidateProducts();
 
-        res.status(201).json({ product, message: 'Created' });
+        res.status(201).json({ product: fullProduct, message: 'Created' });
     } catch (error) {
+        console.error('❌ Create product error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// PUT /admin/products/:id
+// PUT update product
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const product = await Product.findByPk(id);
+        const { parameters, ...productData } = req.body;
 
+        const product = await Product.findByPk(id);
         if (!product) {
             return res.status(404).json({ error: 'Product not found' });
         }
 
-        await product.update(req.body);
-        await cache.invalidateProducts();
-        await cache.del(`product:${product.slug}`);
+        await product.update(productData);
 
-        res.json({ product, message: 'Updated' });
+        // Оновлюємо параметри
+        if (parameters !== undefined) {
+            await Parameter.destroy({ where: { product_id: id } });
+
+            if (parameters.length > 0) {
+                await Parameter.bulkCreate(parameters.map(param => ({
+                    product_id: id,
+                    parameter_name: param.name,
+                    parameter_value: param.value,
+                    slug: param.name.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-'),
+                    param_value_slug: param.value.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+                })));
+            }
+        }
+
+        const fullProduct = await Product.findByPk(id, {
+            include: [
+                { model: Picture, as: 'pictures' },
+                { model: Parameter, as: 'params' },
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
+                    include: [{ model: Category, as: 'category' }]
+                }
+            ]
+        });
+
+        await cache.invalidateProducts();
+
+        res.json({ product: fullProduct, message: 'Updated' });
     } catch (error) {
+        console.error('❌ Update product error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// DELETE /admin/products/:id
+// DELETE product
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const product = await Product.findByPk(id);
 
+        const product = await Product.findByPk(id);
         if (!product) {
             return res.status(404).json({ error: 'Product not found' });
         }
 
-        const slug = product.slug;
+        await Picture.destroy({ where: { product_id: id } });
+        await Parameter.destroy({ where: { product_id: id } });
         await product.destroy();
+
         await cache.invalidateProducts();
-        await cache.del(`product:${slug}`);
 
         res.json({ message: 'Deleted' });
     } catch (error) {
@@ -239,7 +271,7 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// PUT /admin/products/:id/discount
+// PUT discount
 router.put('/:id/discount', async (req, res) => {
     try {
         const { id } = req.params;
@@ -251,30 +283,48 @@ router.put('/:id/discount', async (req, res) => {
         }
 
         await product.update({ discount, sale_price });
+
+        const fullProduct = await Product.findByPk(id, {
+            include: [
+                { model: Picture, as: 'pictures' },
+                { model: Parameter, as: 'params' },
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
+                    include: [{ model: Category, as: 'category' }]
+                }
+            ]
+        });
+
         await cache.invalidateProducts();
 
-        res.json({ product, message: 'Discount updated' });
+        res.json({ product: fullProduct, message: 'Discount updated' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// POST /admin/products/:id/pictures
+// POST add pictures
 router.post('/:id/pictures', async (req, res) => {
     try {
         const { id } = req.params;
-        const { pictures } = req.body;
+        const { pictures, urls } = req.body;  // підтримуємо обидва варіанти
 
         const product = await Product.findByPk(id);
         if (!product) {
             return res.status(404).json({ error: 'Product not found' });
         }
 
-        const pics = (Array.isArray(pictures) ? pictures : [pictures])
-            .map(url => ({ product_id: id, pictures_name: url }));
+        const picUrls = pictures || urls || [];
 
-        await Picture.bulkCreate(pics);
-        await cache.del(`product:${product.slug}`);
+        if (picUrls.length > 0) {
+            await Picture.bulkCreate(picUrls.map(url => ({
+                product_id: id,
+                pictures_name: url
+            })));
+        }
+
+        await cache.invalidateProducts();
 
         res.json({ message: 'Pictures added' });
     } catch (error) {
@@ -282,23 +332,21 @@ router.post('/:id/pictures', async (req, res) => {
     }
 });
 
-// DELETE /admin/products/:id/pictures/:pictureId
+// DELETE picture
 router.delete('/:id/pictures/:pictureId', async (req, res) => {
     try {
         const { pictureId } = req.params;
 
-        const deleted = await Picture.destroy({
-            where: { id: pictureId }
-        });
+        await Picture.destroy({ where: { id: pictureId } });
 
-        if (!deleted) {
-            return res.status(404).json({ error: 'Picture not found' });
-        }
+        await cache.invalidateProducts();
 
         res.json({ message: 'Picture deleted' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
+
+
 
 module.exports = router;

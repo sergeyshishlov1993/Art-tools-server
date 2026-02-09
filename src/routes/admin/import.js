@@ -10,7 +10,7 @@ const {
     updateMapping,
     clearMappingsForSupplier
 } = require('../../services/autoMappingService');
-const { SubCategory, Category, CategoryMapping, ImportSource, Product } = require('../../db');
+const { SubCategory, Category, CategoryMapping, ImportSource, Product, Pictures, Parameter } = require('../../db');
 
 const SOURCES_DIR = path.join(__dirname, '../../../sources');
 if (!fs.existsSync(SOURCES_DIR)) {
@@ -25,6 +25,8 @@ const upload = multer({
     },
     limits: { fileSize: 100 * 1024 * 1024 }
 });
+
+// === ДОПОМІЖНІ ФУНКЦІЇ ===
 
 async function getSupplierPrefixes() {
     const sources = await ImportSource.findAll({
@@ -63,6 +65,91 @@ async function buildInternalSubCategoryWhere() {
     if (conditions.length === 0) return {};
     return { [Op.and]: conditions };
 }
+
+// Видалити всі дані постачальника
+async function deleteSupplierData(supplierPrefix, options = {}) {
+    const {
+        deleteProducts = true,
+        deleteCategories = true,
+        deleteMappings = false
+    } = options;
+
+    const result = {
+        products: 0,
+        pictures: 0,
+        parameters: 0,
+        categories: 0,
+        subCategories: 0,
+        mappings: 0
+    };
+
+    if (deleteProducts) {
+        // Рахуємо товари
+        result.products = await Product.count({
+            where: { supplier_prefix: supplierPrefix }
+        });
+
+        if (result.products > 0) {
+            // Отримуємо ID товарів
+            const productIds = await Product.findAll({
+                where: { supplier_prefix: supplierPrefix },
+                attributes: ['product_id'],
+                raw: true
+            }).then(rows => rows.map(r => r.product_id));
+
+            // Видаляємо картинки
+            if (Pictures) {
+                try {
+                    result.pictures = await Pictures.destroy({
+                        where: { product_id: { [Op.in]: productIds } }
+                    });
+                } catch (e) {
+                    console.log('Pictures delete error:', e.message);
+                }
+            }
+
+            // Видаляємо параметри
+            if (Parameter) {
+                try {
+                    result.parameters = await Parameter.destroy({
+                        where: { product_id: { [Op.in]: productIds } }
+                    });
+                } catch (e) {
+                    console.log('Parameter delete error:', e.message);
+                }
+            }
+
+            // Видаляємо товари
+            await Product.destroy({
+                where: { supplier_prefix: supplierPrefix }
+            });
+        }
+    }
+
+    if (deleteCategories) {
+        // Видаляємо підкатегорії постачальника
+        result.subCategories = await SubCategory.destroy({
+            where: { sub_category_id: { [Op.like]: `${supplierPrefix}_%` } }
+        });
+
+        // Видаляємо категорії постачальника
+        result.categories = await Category.destroy({
+            where: { id: { [Op.like]: `${supplierPrefix}_%` } }
+        });
+    }
+
+    if (deleteMappings && CategoryMapping) {
+        result.mappings = await CategoryMapping.destroy({
+            where: { supplier_prefix: supplierPrefix }
+        });
+    }
+
+    return result;
+}
+
+// ============================================
+// === ОСНОВНІ РОУТИ ІМПОРТУ ===
+// ============================================
 
 // POST /api/admin/import/url
 router.post('/url', async (req, res) => {
@@ -188,6 +275,10 @@ router.post('/file', upload.single('file'), async (req, res) => {
     }
 });
 
+// ============================================
+// === УПРАВЛІННЯ ДЖЕРЕЛАМИ ===
+// ============================================
+
 // GET /api/admin/import/sources
 router.get('/sources', async (req, res) => {
     try {
@@ -195,9 +286,13 @@ router.get('/sources', async (req, res) => {
             order: [['supplier_name', 'ASC']]
         });
 
-        res.json({
-            success: true,
-            sources: sources.map(s => ({
+        // Додаємо кількість товарів для кожного джерела
+        const sourcesWithCounts = await Promise.all(sources.map(async (s) => {
+            const productCount = await Product.count({
+                where: { supplier_prefix: s.supplier_prefix }
+            });
+
+            return {
                 id: s.id,
                 supplierPrefix: s.supplier_prefix,
                 supplierName: s.supplier_name,
@@ -206,8 +301,14 @@ router.get('/sources', async (req, res) => {
                 sourceFilename: s.source_filename,
                 lastImportAt: s.last_import_at,
                 lastImportStats: s.last_import_stats,
-                isActive: s.is_active
-            }))
+                isActive: s.is_active,
+                productCount
+            };
+        }));
+
+        res.json({
+            success: true,
+            sources: sourcesWithCounts
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -307,12 +408,25 @@ router.put('/sources/:id/file', upload.single('file'), async (req, res) => {
 router.delete('/sources/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const { deleteProducts = false } = req.query;
 
         const source = await ImportSource.findByPk(id);
         if (!source) {
             return res.status(404).json({ success: false, error: 'Source not found' });
         }
 
+        let deleted = {};
+
+        // Якщо потрібно видалити товари
+        if (deleteProducts === 'true' || deleteProducts === true) {
+            deleted = await deleteSupplierData(source.supplier_prefix, {
+                deleteProducts: true,
+                deleteCategories: true,
+                deleteMappings: true
+            });
+        }
+
+        // Видаляємо файл
         if (source.source_filename) {
             const filePath = path.join(SOURCES_DIR, source.source_filename);
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -320,11 +434,19 @@ router.delete('/sources/:id', async (req, res) => {
 
         await source.destroy();
 
-        res.json({ success: true, message: 'Source deleted' });
+        res.json({
+            success: true,
+            message: 'Source deleted',
+            deleted
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// ============================================
+// === ЗАПУСК ІМПОРТУ ===
+// ============================================
 
 // POST /api/admin/import/sources/:id/run
 router.post('/sources/:id/run', async (req, res) => {
@@ -442,6 +564,173 @@ router.post('/run-all', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// ============================================
+// === ВИДАЛЕННЯ ТА ПЕРЕІМПОРТ ===
+// ============================================
+
+// DELETE /api/admin/import/sources/:id/products
+router.delete('/sources/:id/products', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { deleteCategories = true } = req.query;
+
+        const source = await ImportSource.findByPk(id);
+        if (!source) {
+            return res.status(404).json({ success: false, error: 'Source not found' });
+        }
+
+        const deleted = await deleteSupplierData(source.supplier_prefix, {
+            deleteProducts: true,
+            deleteCategories: deleteCategories === 'true' || deleteCategories === true,
+            deleteMappings: false
+        });
+
+        res.json({
+            success: true,
+            message: `Deleted all products for ${source.supplier_prefix}`,
+            supplier: source.supplier_prefix,
+            deleted
+        });
+    } catch (error) {
+        console.error('Delete products error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST /api/admin/import/sources/:id/reimport
+router.post('/sources/:id/reimport', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const source = await ImportSource.findByPk(id);
+        if (!source) {
+            return res.status(404).json({ success: false, error: 'Source not found' });
+        }
+
+        // 1. Видаляємо всі товари та категорії постачальника
+        const deleted = await deleteSupplierData(source.supplier_prefix, {
+            deleteProducts: true,
+            deleteCategories: true,
+            deleteMappings: false
+        });
+
+        // 2. Імпортуємо заново
+        let result;
+
+        if (source.source_type === 'url') {
+            if (!source.source_url) {
+                return res.status(400).json({ success: false, error: 'No URL configured' });
+            }
+            result = await ImportService.importFromFeed(source.source_url, {
+                supplierPrefix: source.supplier_prefix
+            });
+        } else {
+            const filePath = path.join(SOURCES_DIR, source.source_filename);
+            if (!fs.existsSync(filePath)) {
+                return res.status(400).json({ success: false, error: 'File not found' });
+            }
+            result = await ImportService.importFromFile(filePath, {
+                supplierPrefix: source.supplier_prefix
+            });
+        }
+
+        // 3. Оновлюємо статистику
+        source.last_import_at = new Date();
+        source.last_import_stats = {
+            categories: result.categories,
+            products: result.products,
+            filtersUpdated: result.filtersUpdated,
+            reimport: true,
+            deletedBefore: deleted
+        };
+        await source.save();
+
+        res.json({
+            success: true,
+            message: `Reimported ${source.supplier_prefix}`,
+            deleted,
+            imported: result,
+            source: {
+                id: source.id,
+                supplierPrefix: source.supplier_prefix,
+                lastImportAt: source.last_import_at
+            }
+        });
+    } catch (error) {
+        console.error('Reimport error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST /api/admin/import/sources/:id/clean-reimport
+router.post('/sources/:id/clean-reimport', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const source = await ImportSource.findByPk(id);
+        if (!source) {
+            return res.status(404).json({ success: false, error: 'Source not found' });
+        }
+
+        // 1. Видаляємо ВСЕ включаючи маппінги
+        const deleted = await deleteSupplierData(source.supplier_prefix, {
+            deleteProducts: true,
+            deleteCategories: true,
+            deleteMappings: true
+        });
+
+        // 2. Імпортуємо заново
+        let result;
+
+        if (source.source_type === 'url') {
+            if (!source.source_url) {
+                return res.status(400).json({ success: false, error: 'No URL configured' });
+            }
+            result = await ImportService.importFromFeed(source.source_url, {
+                supplierPrefix: source.supplier_prefix
+            });
+        } else {
+            const filePath = path.join(SOURCES_DIR, source.source_filename);
+            if (!fs.existsSync(filePath)) {
+                return res.status(400).json({ success: false, error: 'File not found' });
+            }
+            result = await ImportService.importFromFile(filePath, {
+                supplierPrefix: source.supplier_prefix
+            });
+        }
+
+        // 3. Оновлюємо статистику
+        source.last_import_at = new Date();
+        source.last_import_stats = {
+            categories: result.categories,
+            products: result.products,
+            filtersUpdated: result.filtersUpdated,
+            cleanReimport: true,
+            deletedBefore: deleted
+        };
+        await source.save();
+
+        res.json({
+            success: true,
+            message: `Clean reimported ${source.supplier_prefix}`,
+            deleted,
+            imported: result,
+            source: {
+                id: source.id,
+                supplierPrefix: source.supplier_prefix,
+                lastImportAt: source.last_import_at
+            }
+        });
+    } catch (error) {
+        console.error('Clean reimport error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============================================
+// === МАППІНГ КАТЕГОРІЙ ===
+// ============================================
 
 router.get('/mappings/:supplier', async (req, res) => {
     try {
@@ -585,6 +874,10 @@ router.get('/stats/:supplierPrefix', async (req, res) => {
             }
         });
 
+        const productCount = await Product.count({
+            where: { supplier_prefix: normalizedPrefix }
+        });
+
         res.json({
             success: true,
             supplier: normalizedPrefix,
@@ -592,7 +885,8 @@ router.get('/stats/:supplierPrefix', async (req, res) => {
                 total,
                 mapped,
                 unmapped: total - mapped,
-                percent: total > 0 ? Math.round((mapped / total) * 100) : 0
+                percent: total > 0 ? Math.round((mapped / total) * 100) : 0,
+                productCount
             }
         });
     } catch (error) {

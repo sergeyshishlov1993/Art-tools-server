@@ -1,13 +1,17 @@
 const { Router } = require('express');
 const router = Router();
 const { Feedback } = require('../../db');
+const socketService = require('../../services/socketService');
 
 router.post('/', async (req, res) => {
     try {
-        await Feedback.create({
+        const feedback = await Feedback.create({
             name: req.body.name,
-            phone: req.body.phone
+            phone: req.body.phone,
+            status: 'Новий'
         });
+
+        socketService.notifyNewFeedback(feedback);
 
         res.json({ message: 'Заявка успішно створена' });
     } catch (error) {
