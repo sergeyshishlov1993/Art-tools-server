@@ -4,6 +4,24 @@ const { Op } = require('sequelize');
 const { Product, Picture, Parameter, SubCategory, Category, Order } = require('../../db');
 const cache = require('../../utils/cache');
 
+const translitMap = {
+    'а':'a','б':'b','в':'v','г':'h','ґ':'g','д':'d','е':'e','є':'ye',
+    'ж':'zh','з':'z','и':'y','і':'i','ї':'yi','й':'y','к':'k','л':'l',
+    'м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u',
+    'ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch','ь':'',
+    'ю':'yu','я':'ya','ё':'yo','ъ':'','э':'e','ы':'y'
+};
+
+function slugify(text) {
+    return String(text)
+        .toLowerCase()
+        .split('')
+        .map(char => translitMap[char] !== undefined ? translitMap[char] : char)
+        .join('')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
 // GET all products
 router.get('/', async (req, res) => {
     try {
@@ -148,10 +166,7 @@ router.post('/', async (req, res) => {
         }
 
         if (!productData.slug && productData.product_name) {
-            productData.slug = String(productData.product_name)
-                    .toLowerCase()
-                    .replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
-                    .replace(/^-|-$/g, '')
+            productData.slug = slugify(productData.product_name)
                 + '-' + productData.product_id.toLowerCase();
         }
 
@@ -173,10 +188,9 @@ router.post('/', async (req, res) => {
                 product_id: product.product_id,
                 parameter_name: param.name,
                 parameter_value: param.value,
-                slug: param.name.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-'),
-                param_value_slug: param.value.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+                slug: slugify(param.name),
+                param_value_slug: slugify(param.value)
             })));
-            console.log('✅ Parameters created:', parameters.length);
         }
 
         const fullProduct = await Product.findByPk(product.product_id, {
@@ -211,9 +225,12 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Product not found' });
         }
 
+        if (productData.product_name && !productData.slug) {
+            productData.slug = slugify(productData.product_name) + '-' + id.toLowerCase();
+        }
+
         await product.update(productData);
 
-        // Оновлюємо параметри
         if (parameters !== undefined) {
             await Parameter.destroy({ where: { product_id: id } });
 
@@ -222,8 +239,8 @@ router.put('/:id', async (req, res) => {
                     product_id: id,
                     parameter_name: param.name,
                     parameter_value: param.value,
-                    slug: param.name.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-'),
-                    param_value_slug: param.value.toLowerCase().replace(/[^a-z0-9а-яіїєґ]+/gi, '-')
+                    slug: slugify(param.name),
+                    param_value_slug: slugify(param.value)
                 })));
             }
         }
