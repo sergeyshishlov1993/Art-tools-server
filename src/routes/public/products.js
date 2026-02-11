@@ -3,6 +3,7 @@ const router = express.Router();
 const { Op, Sequelize } = require('sequelize');
 const { Product, Picture, Parameter, CategoryFilter, SubCategory, Category } = require('../../db');
 const cache = require('../../utils/cache');
+const { BRAND_PRIORITY } = require('../../config/brands');
 
 const LIST_ATTRS = [
     'product_id', 'slug', 'product_name', 'brand',
@@ -10,7 +11,41 @@ const LIST_ATTRS = [
     'bestseller', 'sale', 'sub_category_id'
 ];
 
-// GET /products/sub-category/:subCategoryId
+function buildBrandOrder() {
+    const cases = BRAND_PRIORITY
+        .map((brand, index) => `WHEN brand = '${brand.replace(/'/g, "''")}' THEN ${index}`)
+        .join(' ');
+    return Sequelize.literal(`CASE ${cases} ELSE ${BRAND_PRIORITY.length} END`);
+}
+
+const BRAND_ORDER = buildBrandOrder();
+
+const BESTSELLER_ORDER = Sequelize.literal(
+    "CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"
+);
+
+const SALE_ORDER = Sequelize.literal(
+    "CASE WHEN sale = 'true' THEN 0 ELSE 1 END"
+);
+
+const POPULAR_ORDER = [
+    [BRAND_ORDER, 'ASC'],
+    [BESTSELLER_ORDER, 'ASC'],
+    [SALE_ORDER, 'ASC'],
+    ['createdAt', 'DESC']
+];
+
+const SORT_MAP = {
+    'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+    'price_asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
+    'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+    'price_desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
+    'name_asc': [['product_name', 'ASC']],
+    'new': [['createdAt', 'DESC']],
+    'newest': [['createdAt', 'DESC']],
+    'popular': POPULAR_ORDER
+};
+
 router.get('/sub-category/:subCategoryId', async (req, res) => {
     try {
         const { subCategoryId } = req.params;
@@ -48,22 +83,7 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
         if (bestseller === 'true') where.bestseller = 'true';
         if (discount === 'true') where.discount = { [Op.gt]: 0 };
 
-        // ВИПРАВЛЕНО: Сортування
-        const sortMap = {
-            'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-            'price_asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-            'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-            'price_desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-            'name_asc': [['product_name', 'ASC']],
-            'new': [['createdAt', 'DESC']],
-            'newest': [['createdAt', 'DESC']],
-            'popular': [
-                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                ['createdAt', 'DESC']
-            ]
-        };
-        const order = sortMap[sort] || sortMap['popular'];
+        const order = SORT_MAP[sort] || SORT_MAP['popular'];
 
         const attrKeys = Object.keys(attrFilters).filter((key) => !['page', 'limit'].includes(key));
 
@@ -146,7 +166,6 @@ router.get('/sub-category/:subCategoryId', async (req, res) => {
     }
 });
 
-// GET /products/category/:categoryId
 router.get('/category/:categoryId', async (req, res) => {
     try {
         const { categoryId } = req.params;
@@ -176,10 +195,7 @@ router.get('/category/:categoryId', async (req, res) => {
             }],
             limit,
             offset,
-            order: [
-                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                ['createdAt', 'DESC']
-            ],
+            order: POPULAR_ORDER,
             distinct: true
         });
 
@@ -195,7 +211,6 @@ router.get('/category/:categoryId', async (req, res) => {
     }
 });
 
-// GET /products - головний ендпоінт з фільтрами
 router.get('/', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -212,13 +227,12 @@ router.get('/', async (req, res) => {
             bestseller,
             with_discount,
             sort,
-            search,  // <-- ДОДАНО
+            search,
             ...attrFilters
         } = req.query;
 
         const where = { available: 'true' };
 
-        // ========== ПОШУК ========== //
         if (search) {
             const searchTerm = String(search).trim();
             if (searchTerm) {
@@ -230,7 +244,6 @@ router.get('/', async (req, res) => {
             }
         }
 
-        // Фільтр по категорії
         if (sub_category) {
             const subCategories = String(sub_category).split(',').filter(Boolean);
             where.sub_category_id = { [Op.in]: subCategories };
@@ -246,13 +259,11 @@ router.get('/', async (req, res) => {
             }
         }
 
-        // Фільтр по бренду
         if (brand) {
             const brands = String(brand).split(',').filter(Boolean);
             where.brand = { [Op.in]: brands };
         }
 
-        // Фільтр по ціні
         if (price_min || price_max) {
             where[Op.and] = where[Op.and] || [];
             if (price_min) {
@@ -267,12 +278,10 @@ router.get('/', async (req, res) => {
             }
         }
 
-        // Спеціальні фільтри
         if (sale === 'true') where.sale = 'true';
         if (bestseller === 'true') where.bestseller = 'true';
         if (with_discount === 'true') where.discount = { [Op.gt]: 0 };
 
-        // Фільтр по атрибутах
         const attrKeys = Object.keys(attrFilters).filter(key => !['page', 'limit'].includes(key));
 
         if (attrKeys.length > 0) {
@@ -310,28 +319,16 @@ router.get('/', async (req, res) => {
             }
         }
 
-        // Сортування (для пошуку - по релевантності)
         let order;
         if (search && !sort) {
-            // При пошуку сортуємо по релевантності (точне співпадіння першим)
-            const searchTerm = String(search).trim();
+            const searchTerm = String(search).trim().replace(/'/g, "''");
             order = [
                 [Sequelize.literal(`CASE WHEN product_name ILIKE '${searchTerm}%' THEN 0 WHEN product_name ILIKE '%${searchTerm}%' THEN 1 ELSE 2 END`), 'ASC'],
-                [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
+                [BRAND_ORDER, 'ASC'],
                 ['createdAt', 'DESC']
             ];
         } else {
-            const sortMap = {
-                'price-asc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'ASC']],
-                'price-desc': [[Sequelize.literal('CAST(price AS DECIMAL)'), 'DESC']],
-                'new': [['createdAt', 'DESC']],
-                'popular': [
-                    [Sequelize.literal("CASE WHEN bestseller = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                    [Sequelize.literal("CASE WHEN sale = 'true' THEN 0 ELSE 1 END"), 'ASC'],
-                    ['createdAt', 'DESC']
-                ]
-            };
-            order = sortMap[sort] || sortMap['popular'];
+            order = SORT_MAP[sort] || SORT_MAP['popular'];
         }
 
         const { count, rows } = await Product.findAndCountAll({
@@ -359,7 +356,6 @@ router.get('/', async (req, res) => {
     }
 });
 
-// GET /products/:slug - один продукт
 router.get('/:slug', async (req, res) => {
     try {
         const { slug } = req.params;
