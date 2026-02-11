@@ -5,12 +5,27 @@ const { Product, Category, SubCategory } = require('../../db');
 
 const FilterService = require('../../services/filterService');
 
-const slugify = (text) => text.toString().toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '');
+const slugify = (text) => {
+    const map = {
+        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'h', 'ґ': 'g', 'д': 'd', 'е': 'e', 'є': 'ye',
+        'ж': 'zh', 'з': 'z', 'и': 'y', 'і': 'i', 'ї': 'yi', 'й': 'y', 'к': 'k', 'л': 'l',
+        'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+        'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ь': '',
+        'ю': 'yu', 'я': 'ya', 'ъ': '', 'ы': 'y', 'э': 'e'
+    }
+
+    const result = text.toString().toLowerCase()
+        .split('')
+        .map(char => map[char] || char)
+        .join('')
+        .replace(/\s+/g, '-')
+        .replace(/[^\w\-]+/g, '')
+        .replace(/--+/g, '-')
+        .replace(/^-+/, '')
+        .replace(/-+$/, '')
+
+    return result || 'cat-' + Date.now()
+}
 
 // === ДОПОМІЖНІ ФУНКЦІЇ ===
 
@@ -307,6 +322,11 @@ router.post('/subcategory', async (req, res) => {
         }
 
         const subId = id || slugify(name);
+
+        if (!subId) {
+            return res.status(400).json({ message: 'Cannot generate ID from name. Please provide ID manually (latin characters).' });
+        }
+
         const [sub, created] = await SubCategory.findOrCreate({
             where: { sub_category_id: subId },
             defaults: {
