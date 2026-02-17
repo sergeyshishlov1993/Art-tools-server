@@ -8,8 +8,6 @@ const FilterService = require('./filterService');
 const { generateSlug, generateFilterSlug } = require('../utils/slugify');
 const { parseDescriptionSpecs } = require('./parsers/descriptionSpecsParser');
 
-// === КОНСТАНТИ ===
-
 const BRAND_MAP = {
     grosser: 'Grosser',
     grasser: 'Grosser',
@@ -25,62 +23,41 @@ const normalizeBrand = (brand) => {
     return BRAND_MAP[key] || String(brand).trim();
 };
 
-// Маппінг кастомних тегів Google Shopping на наші параметри
 const RSS_TAG_TO_PARAM_MAP = {
-    // Потужність
     'potuzhnist': 'Потужність',
     'potuzhnist-dvyguna': 'Потужність',
     'power': 'Потужність',
     'moshchnost': 'Потужність',
-
-    // Напруга
     'napruga': 'Напруга',
     'voltage': 'Напруга',
     'napryazhenie': 'Напруга',
-
-    // Тиск
     'maksymalnyj-tysk': 'Робочий тиск',
     'robochyj-tysk': 'Робочий тиск',
     'tysk': 'Робочий тиск',
     'davlenie': 'Робочий тиск',
-
-    // Продуктивність
     'produktyvnist': 'Продуктивність',
     'proizvoditelnost': 'Продуктивність',
-
-    // Ємність
     'yemnist': 'Ємність',
     'yemnist-baka': 'Ємність бака',
     'obyem-baka': 'Ємність бака',
     'emkost': 'Ємність',
-
-    // Вага
     'vaga': 'Вага',
     'vaga-netto': 'Вага',
     'ves': 'Вага',
     'weight': 'Вага',
-
-    // Габарити
     'gabaryty': 'Габарити',
     'gabaryty-upakovky': 'Габарити',
     'razmery': 'Габарити',
-
-    // Оберти
     'oberty': 'Оберти',
     'kilkist-obertiv': 'Оберти',
     'chastota-obertannya': 'Оберти',
-
-    // Діаметр
     'diametr': 'Діаметр',
     'diametr-dyska': 'Діаметр диска',
-
-    // Довжина
     'dovzhyna': 'Довжина',
     'dovzhyna-shyny': 'Довжина шини',
     'dlina': 'Довжина'
 };
 
-// Теги які ігноруємо
 const IGNORED_RSS_TAGS = new Set([
     'g:id', 'g:title', 'g:description', 'g:link', 'g:image_link',
     'g:availability', 'g:price', 'g:sale_price', 'g:product_type',
@@ -139,8 +116,6 @@ const PARAMETER_SYNONYMS = new Map([
     ['gabaryty-upakovky', 'gabaryty'],
     ['razmery', 'gabaryty']
 ]);
-
-// === ДОПОМІЖНІ ФУНКЦІЇ ===
 
 function decodeHtmlEntitiesBasic(value) {
     const raw = String(value ?? '');
@@ -213,10 +188,8 @@ function extractNumberFromText(value) {
 
 function normalizeAvailability(value) {
     const text = String(value ?? '').toLowerCase().trim();
-    if (!text) return 'true';
-    if (['in stock', 'in_stock', 'instock', 'preorder', 'backorder'].includes(text)) return 'true';
-    if (['out of stock', 'out_of_stock', 'outofstock', 'sold out', 'sold_out'].includes(text)) return 'false';
-    return 'true';
+    if (['true', 'in stock', 'in_stock', 'instock', 'preorder', 'backorder'].includes(text)) return 'true';
+    return 'false';
 }
 
 function canonicalizeParameterNameToSlug(parameterName) {
@@ -271,12 +244,9 @@ async function getSupplierPrefixes() {
     ));
 }
 
-// === ПАРСЕРИ RSS (Google Shopping) ===
-
 function pickExternalCategoryIdFromRssItem(item) {
     const productType = item?.['g:product_type'] || item?.product_type;
     if (productType) {
-        // "Home &gt; Компресори &gt; Компресорні блоки" → "Компресорні блоки"
         const decoded = decodeHtmlEntitiesBasic(String(productType).trim());
         const parts = decoded.split(/\s*>\s*/);
         return parts[parts.length - 1] || decoded;
@@ -293,7 +263,6 @@ function extractCustomParamsFromRssItem(item) {
     if (!item || typeof item !== 'object') return params;
 
     for (const [key, value] of Object.entries(item)) {
-        // Пропускаємо стандартні теги
         if (IGNORED_RSS_TAGS.has(key)) continue;
         if (key.startsWith('g:')) continue;
         if (!value) continue;
@@ -301,7 +270,6 @@ function extractCustomParamsFromRssItem(item) {
         const valueStr = String(value).trim();
         if (!valueStr || valueStr === 'no') continue;
 
-        // Перетворюємо kebab-case в читабельну назву
         const tagSlug = key.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
         const mappedName = RSS_TAG_TO_PARAM_MAP[tagSlug];
 
@@ -314,7 +282,6 @@ function extractCustomParamsFromRssItem(item) {
 }
 
 function buildOfferFromRssItem(item, filterLanguage = 'UA') {
-    // Фільтруємо по мові
     const lang = item?.Language || item?.language || '';
     if (filterLanguage && lang && String(lang).toUpperCase() !== filterLanguage.toUpperCase()) {
         return null;
@@ -326,16 +293,13 @@ function buildOfferFromRssItem(item, filterLanguage = 'UA') {
     const title = decodeHtmlEntitiesBasic(item?.['g:title'] || item?.title || '');
     const description = decodeHtmlEntitiesBasic(item?.['g:description'] || item?.description || '');
 
-    // Бренд з Vendor тега
     const brand = decodeHtmlEntitiesBasic(item?.Vendor || item?.vendor || item?.['g:brand'] || item?.brand || '');
 
-    // Ціни: g:price = актуальна ціна, price-regular = стара ціна
     const currentPrice = item?.['g:price'] || item?.price || '';
     const regularPrice = item?.['price-regular'] || item?.oldprice || '';
 
     const availabilityText = item?.['g:availability'] || item?.availability || '';
 
-    // Картинки
     const pictures = [];
     const imageMain = item?.['g:image_link'] || item?.image_link;
     const additionalImages = item?.['g:additional_image_link'] || item?.additional_image_link;
@@ -349,7 +313,6 @@ function buildOfferFromRssItem(item, filterLanguage = 'UA') {
         if (u) pictures.push(u);
     }
 
-    // Кастомні параметри з тегів
     const customParams = extractCustomParamsFromRssItem(item);
 
     return {
@@ -365,11 +328,10 @@ function buildOfferFromRssItem(item, filterLanguage = 'UA') {
         available: normalizeAvailability(availabilityText),
         picture: pictures,
         param: customParams,
-        _rawItem: item // Зберігаємо для парсингу параметрів
+        _rawItem: item
     };
 }
 
-// === ОСНОВНИЙ КЛАС ===
 
 class ImportService {
     static async importFromFeed(url, options = {}) {
@@ -388,12 +350,12 @@ class ImportService {
 
     static async processXML(xmlData, options = {}) {
         const supplierPrefix = String(options.supplierPrefix || 'DEFAULT').toUpperCase().trim() || 'DEFAULT';
-        const filterLanguage = options.filterLanguage || 'UA'; // За замовчуванням тільки українська
+        const filterLanguage = options.filterLanguage || 'UA';
 
         const parser = new xml2js.Parser({
             explicitArray: false,
             mergeAttrs: true,
-            tagNameProcessors: [], // Залишаємо теги як є
+            tagNameProcessors: [],
             attrNameProcessors: []
         });
 
@@ -446,7 +408,6 @@ class ImportService {
         for (const item of items) {
             if (!item) continue;
 
-            // Пропускаємо російські товари
             const lang = item?.Language || item?.language || '';
             if (lang && String(lang).toUpperCase() === 'RU') continue;
 
@@ -560,28 +521,26 @@ class ImportService {
         const xmlId = String(offer.id || offer.$?.id || '');
         const name = offer.name || offer.model || offer.title || `Product_${xmlId || 'unknown'}`;
 
-        // g:price = актуальна ціна (можливо зі знижкою)
-        // price-regular / oldprice = стара ціна (без знижки)
         const currentPrice = extractNumberFromText(offer.price);
         const regularPrice = offer.oldprice ? extractNumberFromText(offer.oldprice) : null;
 
         let rawBrand = offer.vendor || offer.brand || '';
         const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
 
-        // Визначаємо що є що
         let finalPrice, finalSalePrice, discount;
 
         if (regularPrice && regularPrice > currentPrice) {
-            // Є стара ціна і вона більша за актуальну = є знижка
-            finalPrice = regularPrice;      // Стара ціна як основна
-            finalSalePrice = currentPrice;  // Актуальна як sale_price
+            finalPrice = regularPrice;
+            finalSalePrice = currentPrice;
             discount = Math.round((1 - currentPrice / regularPrice) * 100);
         } else {
-            // Немає знижки або дані некоректні
             finalPrice = currentPrice;
             finalSalePrice = 0;
             discount = 0;
         }
+
+        const availableRaw = String(offer.available ?? '').trim();
+        const isAvailable = availableRaw !== '' && availableRaw !== 'false';
 
         return {
             xml_id: xmlId,
@@ -589,11 +548,11 @@ class ImportService {
             product_name: name,
             slug: buildUniqueProductSlug(name, supplierPrefix, xmlId),
             product_description: offer.description || '',
-            price: finalPrice,              // Основна ціна (без знижки)
-            sale_price: finalSalePrice,     // Ціна зі знижкою (менша)
+            price: finalPrice,
+            sale_price: finalSalePrice,
             discount: discount,
             brand: brand,
-            available: offer.available !== 'false' ? 'true' : 'false',
+            available: isAvailable ? 'true' : 'false',
             sub_category_id: internalCategoryId,
             sale: discount > 0 ? 'true' : 'false',
             bestseller: 'false',
@@ -601,44 +560,12 @@ class ImportService {
         };
     }
 
-    // static _parseProduct(offer, supplierPrefix, internalCategoryId) {
-    //     const xmlId = String(offer.id || offer.$?.id || '');
-    //     const name = offer.name || offer.model || offer.title || `Product_${xmlId || 'unknown'}`;
-    //
-    //     const price = extractNumberFromText(offer.price);
-    //     const oldPrice = offer.oldprice ? extractNumberFromText(offer.oldprice) : null;
-    //
-    //     let rawBrand = offer.vendor || offer.brand || '';
-    //     const brand = normalizeBrand(rawBrand) || normalizeBrand(supplierPrefix) || supplierPrefix;
-    //
-    //     // Знижка: якщо oldPrice > price
-    //     const discount = oldPrice && oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
-    //
-    //     return {
-    //         xml_id: xmlId,
-    //         supplier_prefix: supplierPrefix,
-    //         product_name: name,
-    //         slug: buildUniqueProductSlug(name, supplierPrefix, xmlId),
-    //         product_description: offer.description || '',
-    //         price: price,
-    //         sale_price: oldPrice || 0,
-    //         discount: discount,
-    //         brand: brand,
-    //         available: offer.available !== 'false' ? 'true' : 'false',
-    //         sub_category_id: internalCategoryId,
-    //         sale: discount > 0 ? 'true' : 'false',
-    //         bestseller: 'false',
-    //         custom_product: false
-    //     };
-    // }
-
     static async _saveParameters(productId, offer) {
         try {
             await Parameter.destroy({ where: { product_id: productId } });
 
             const finalParamsByKey = new Map();
 
-            // 1. Спочатку параметри з offer.param (для YML або кастомні з RSS)
             const offerParams = toArray(offer.param);
             for (const param of offerParams) {
                 if (!param) continue;
@@ -655,7 +582,6 @@ class ImportService {
                 }
             }
 
-            // 2. Якщо є _rawItem (RSS), парсимо кастомні теги
             if (offer._rawItem && finalParamsByKey.size === 0) {
                 const customParams = extractCustomParamsFromRssItem(offer._rawItem);
                 for (const param of customParams) {
@@ -667,7 +593,6 @@ class ImportService {
                 }
             }
 
-            // 3. Якщо все ще пусто - парсимо з description
             if (finalParamsByKey.size === 0) {
                 const extracted = parseDescriptionSpecs(offer.description || '');
                 for (const item of extracted) {
@@ -679,7 +604,6 @@ class ImportService {
                 }
             }
 
-            // Зберігаємо
             for (const entry of finalParamsByKey.values()) {
                 await Parameter.create({
                     product_id: productId,
