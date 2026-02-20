@@ -22,6 +22,8 @@ module.exports = {
             { sub_category_id: 'ak-renovator', sub_category_name: 'Акумуляторні реноватори', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-sad', sub_category_name: 'Акумуляторна садова техніка', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-kompresor', sub_category_name: 'Акумуляторні компресори', parent_id: 'accum-tool' },
+            { sub_category_id: 'ak-farbopult', sub_category_name: 'Акумуляторні фарбопульти', parent_id: 'accum-tool' },
+            { sub_category_id: 'ak-sekator', sub_category_name: 'Акумуляторні секатори', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-batareya', sub_category_name: 'Акумулятори та зарядні пристрої', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-nabory', sub_category_name: 'Набори акумуляторного інструменту', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-inshe', sub_category_name: 'Інший акумуляторний інструмент', parent_id: 'accum-tool' },
@@ -36,6 +38,7 @@ module.exports = {
             { sub_category_id: 'el-graver', sub_category_name: 'Гравери', parent_id: 'electro-tool' },
             { sub_category_id: 'el-fen', sub_category_name: 'Будівельні фени', parent_id: 'electro-tool' },
             { sub_category_id: 'el-payalnik', sub_category_name: 'Паяльники для труб', parent_id: 'electro-tool' },
+            { sub_category_id: 'el-inshe', sub_category_name: 'Інший електроінструмент', parent_id: 'electro-tool' },
 
             { sub_category_id: 'st-tortsovochna', sub_category_name: 'Торцювальні пили', parent_id: 'verstaty' },
             { sub_category_id: 'st-tsyrkulyarka', sub_category_name: 'Циркулярні верстати', parent_id: 'verstaty' },
@@ -44,12 +47,14 @@ module.exports = {
             { sub_category_id: 'st-sverdlylny', sub_category_name: 'Свердлильні верстати', parent_id: 'verstaty' },
             { sub_category_id: 'st-tochylo', sub_category_name: 'Точильні верстати', parent_id: 'verstaty' },
             { sub_category_id: 'st-plytkoriz', sub_category_name: 'Плиткорізи', parent_id: 'verstaty' },
+            { sub_category_id: 'st-inshe', sub_category_name: 'Інші верстати та обладнання', parent_id: 'verstaty' },
 
             { sub_category_id: 'zv-invertor', sub_category_name: 'Зварювальні інвертори (MMA)', parent_id: 'zvaryuvannya' },
             { sub_category_id: 'zv-napivavtomat', sub_category_name: 'Напівавтомати (MIG/MAG)', parent_id: 'zvaryuvannya' },
             { sub_category_id: 'zv-plazmoriz', sub_category_name: 'Плазморізи', parent_id: 'zvaryuvannya' },
             { sub_category_id: 'zv-maska', sub_category_name: 'Маски зварника', parent_id: 'zvaryuvannya' },
             { sub_category_id: 'zv-material', sub_category_name: 'Електроди, дріт та аксесуари', parent_id: 'zvaryuvannya' },
+            { sub_category_id: 'zv-inshe', sub_category_name: 'Інше зварювальне обладнання', parent_id: 'zvaryuvannya' },
 
             { sub_category_id: 'sad-benzopyla', sub_category_name: 'Бензопили', parent_id: 'sad-gorod' },
             { sub_category_id: 'sad-elektropyla', sub_category_name: 'Електроланцюгові пили', parent_id: 'sad-gorod' },
@@ -60,6 +65,7 @@ module.exports = {
             { sub_category_id: 'sad-podribnyuvach', sub_category_name: 'Подрібнювачі гілок', parent_id: 'sad-gorod' },
             { sub_category_id: 'sad-pylosos', sub_category_name: 'Садові пилососи та повітродувки', parent_id: 'sad-gorod' },
             { sub_category_id: 'sad-motobur', sub_category_name: 'Мотобури', parent_id: 'sad-gorod' },
+            { sub_category_id: 'sad-inshe', sub_category_name: 'Інша садова техніка', parent_id: 'sad-gorod' },
 
             { sub_category_id: 'bud-generator', sub_category_name: 'Генератори', parent_id: 'budivnytstvo' },
             { sub_category_id: 'bud-kompresor', sub_category_name: 'Пневмоінструмент та компресори', parent_id: 'budivnytstvo' },
@@ -67,12 +73,14 @@ module.exports = {
             { sub_category_id: 'bud-pylosos', sub_category_name: 'Будівельні пилососи', parent_id: 'budivnytstvo' },
             { sub_category_id: 'bud-teplo', sub_category_name: 'Обігрівачі та теплові гармати', parent_id: 'budivnytstvo' },
             { sub_category_id: 'bud-drabyna', sub_category_name: "Драбини та стрем'янки", parent_id: 'budivnytstvo' },
+            { sub_category_id: 'bud-inshe', sub_category_name: 'Інше будівельне обладнання', parent_id: 'budivnytstvo' },
 
             { sub_category_id: 'avto-instrument', sub_category_name: 'Автоінструмент та домкрати', parent_id: 'avto-rashodnik' },
             { sub_category_id: 'avto-nabor', sub_category_name: 'Набори інструментів', parent_id: 'avto-rashodnik' },
             { sub_category_id: 'roz-dysk', sub_category_name: 'Диски (пильні, алмазні, абразивні)', parent_id: 'avto-rashodnik' },
             { sub_category_id: 'roz-sverdlo', sub_category_name: 'Свердла, біти, бури', parent_id: 'avto-rashodnik' },
-            { sub_category_id: 'roz-sad', sub_category_name: 'Розхідні матеріали для саду (волосінь, ланцюги, мастила)', parent_id: 'avto-rashodnik' }
+            { sub_category_id: 'roz-sad', sub_category_name: 'Розхідні матеріали для саду (волосінь, ланцюги, мастила)', parent_id: 'avto-rashodnik' },
+            { sub_category_id: 'avto-inshe', sub_category_name: 'Інші автотовари та розхідні матеріали', parent_id: 'avto-rashodnik' }
         ], {});
     },
 
