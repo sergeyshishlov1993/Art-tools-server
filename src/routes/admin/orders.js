@@ -327,9 +327,10 @@ router.put('/delete/:parentId/:itemId', async (req, res) => {
 // PUT /api/admin/orders/update/:id
 router.put('/update/:id', async (req, res) => {
     const allowedFields = [
-        'name', 'phone', 'email', 'surname', 'patronymic',
-        'city', 'warehouse', 'address', 'comment', 'admin_comment',
-        'delivery_type', 'payment_type', 'total_price', 'source'
+        'name', 'second_name', 'phone',
+        'city', 'postal_office', 'courier_delivery_address',
+        'payment_method', 'comment',
+        'total_price', 'source'
     ];
 
     try {
