@@ -324,6 +324,57 @@ router.put('/delete/:parentId/:itemId', async (req, res) => {
     }
 });
 
+// PUT /api/admin/orders/update/:id
+router.put('/update/:id', async (req, res) => {
+    const allowedFields = [
+        'name', 'phone', 'email', 'surname', 'patronymic',
+        'city', 'warehouse', 'address', 'comment', 'admin_comment',
+        'delivery_type', 'payment_type', 'total_price', 'source'
+    ];
+
+    try {
+        const updates = {};
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updates[field] = req.body[field];
+            }
+        }
+
+        if (!Object.keys(updates).length) {
+            return res.status(400).json({ message: 'Немає даних для оновлення' });
+        }
+
+        const [updated] = await Order.update(updates, {
+            where: {
+                [Op.or]: [
+                    { order_id: req.params.id },
+                    { order_number: req.params.id }
+                ]
+            }
+        });
+
+        if (!updated) {
+            return res.status(404).json({ message: 'Замовлення не знайдено' });
+        }
+
+        const order = await Order.findOne({
+            where: {
+                [Op.or]: [
+                    { order_id: req.params.id },
+                    { order_number: req.params.id }
+                ]
+            },
+            include: [{ model: OrderItem, as: 'items' }]
+        });
+
+        res.json({ message: 'Замовлення оновлено', order });
+    } catch (error) {
+        console.error('Update order error:', error);
+        res.status(500).json({ message: 'Помилка сервера' });
+    }
+});
+
 // GET /api/admin/orders/:id
 router.get('/:id', async (req, res) => {
     try {
