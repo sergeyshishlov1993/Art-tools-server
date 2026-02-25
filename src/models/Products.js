@@ -114,11 +114,25 @@ module.exports = function (sequelize) {
     };
 
     Product.prototype.getFinalPrice = function() {
-        return parseFloat(this.price);
+        const price = parseFloat(this.price) || 0;
+        const salePrice = parseFloat(this.sale_price) || 0;
+
+        if (salePrice > 0 && salePrice < price) {
+            return salePrice;
+        }
+
+        return price;
     };
 
     Product.prototype.getOldPrice = function() {
-        return this.sale_price ? parseFloat(this.sale_price) : null;
+        const price = parseFloat(this.price) || 0;
+        const salePrice = parseFloat(this.sale_price) || 0;
+
+        if (salePrice > 0 && salePrice < price) {
+            return price;
+        }
+
+        return null;
     };
 
     return Product;

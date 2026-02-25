@@ -1,10 +1,49 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
+const fs = require('fs');
+const path = require('path');
+
+const CHAT_IDS_FILE = path.join(__dirname, '../data/telegram-chats.json');
 
 class TelegramService {
     constructor() {
         this.bot = null;
         this.chatIds = [];
         this.baseUrl = process.env.SITE_URL || 'https://your-site.com';
+    }
+
+    _loadChatIds() {
+        const envIds = (process.env.TELEGRAM_CHAT_ID || '')
+            .split(',')
+            .map(id => Number(id.trim()))
+            .filter(id => !isNaN(id) && id !== 0);
+
+        let fileIds = [];
+        try {
+            if (fs.existsSync(CHAT_IDS_FILE)) {
+                fileIds = JSON.parse(fs.readFileSync(CHAT_IDS_FILE, 'utf-8'));
+            }
+        } catch (e) {
+            console.error('[Telegram] Error loading chat IDs file:', e.message);
+        }
+
+        this.chatIds = [...new Set([...envIds, ...fileIds])];
+    }
+
+    _saveChatIds() {
+        try {
+            const dir = path.dirname(CHAT_IDS_FILE);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(CHAT_IDS_FILE, JSON.stringify(this.chatIds));
+        } catch (e) {
+            console.error('[Telegram] Error saving chat IDs:', e.message);
+        }
+    }
+
+    _mainKeyboard() {
+        return Markup.keyboard([
+            ['✅ Підписатись', '❌ Відписатись'],
+            ['📊 Статус']
+        ]).resize();
     }
 
     init() {
@@ -14,18 +53,51 @@ class TelegramService {
             return;
         }
 
+        this._loadChatIds();
         this.bot = new Telegraf(token);
 
-        this.bot.on('message', (ctx) => {
-            if (!this.chatIds.includes(ctx.chat.id)) {
-                this.chatIds.push(ctx.chat.id);
-                console.log(`[Telegram] Chat ID: ${ctx.chat.id}`);
-                ctx.reply('Дякуємо за ініціалізацію бота!');
+        this.bot.command('start', (ctx) => {
+            ctx.reply(
+                '👋 Бот сповіщень про замовлення\n\nОберіть дію:',
+                this._mainKeyboard()
+            );
+        });
+
+        this.bot.hears('✅ Підписатись', (ctx) => {
+            const chatId = ctx.chat.id;
+            if (!this.chatIds.includes(chatId)) {
+                this.chatIds.push(chatId);
+                this._saveChatIds();
+                ctx.reply('✅ Ви підписані на сповіщення про замовлення!');
+                console.log(`[Telegram] New subscriber: ${chatId}`);
+            } else {
+                ctx.reply('Ви вже підписані.');
             }
         });
 
+        this.bot.hears('❌ Відписатись', (ctx) => {
+            const chatId = ctx.chat.id;
+            if (this.chatIds.includes(chatId)) {
+                this.chatIds = this.chatIds.filter(id => id !== chatId);
+                this._saveChatIds();
+                ctx.reply('❌ Ви відписані від сповіщень.', this._mainKeyboard());
+            } else {
+                ctx.reply('Ви не були підписані.');
+            }
+        });
+
+        this.bot.hears('📊 Статус', (ctx) => {
+            const chatId = ctx.chat.id;
+            const subscribed = this.chatIds.includes(chatId);
+            ctx.reply(
+                subscribed
+                    ? `📊 Ви підписані ✅\n👥 Всього підписників: ${this.chatIds.length}`
+                    : '📊 Ви не підписані ❌'
+            );
+        });
+
         this.bot.launch()
-            .then(() => console.log('[Telegram] Bot started'))
+            .then(() => console.log(`[Telegram] Bot started, subscribers: ${this.chatIds.length}`))
             .catch(err => console.error('[Telegram] Error:', err));
 
         process.once('SIGINT', () => this.bot.stop('SIGINT'));
@@ -33,10 +105,7 @@ class TelegramService {
     }
 
     _sendMessage(message) {
-        if (!this.bot) {
-            console.warn('[Telegram] Bot not initialized');
-            return;
-        }
+        if (!this.bot || !this.chatIds.length) return;
 
         this.chatIds.forEach(chatId => {
             this.bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' }).catch(err => {
@@ -46,10 +115,7 @@ class TelegramService {
     }
 
     _sendPhoto(photoUrl, caption) {
-        if (!this.bot) {
-            console.warn('[Telegram] Bot not initialized');
-            return;
-        }
+        if (!this.bot || !this.chatIds.length) return;
 
         this.chatIds.forEach(chatId => {
             this.bot.telegram.sendPhoto(chatId, photoUrl, {
@@ -63,9 +129,7 @@ class TelegramService {
     }
 
     _sendMediaGroup(photos, caption) {
-        if (!this.bot || !photos.length) {
-            return;
-        }
+        if (!this.bot || !photos.length || !this.chatIds.length) return;
 
         const media = photos.slice(0, 10).map((url, index) => ({
             type: 'photo',
