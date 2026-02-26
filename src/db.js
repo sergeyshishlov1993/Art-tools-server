@@ -16,6 +16,7 @@ const Admin = require("./models/Admin")(sequelize);
 const Category = require("./models/Category")(sequelize);
 const CategoryFilter = require("./models/CategoryFilter")(sequelize);
 const CategoryMapping = require("./models/CategoryMapping")(sequelize);
+const Expense = require("./models/Expense")(sequelize);
 const Feedback = require("./models/Feedback")(sequelize);
 const ImportSource = require('./models/ImportSource')(sequelize);
 const Order = require("./models/Orders")(sequelize);
@@ -117,6 +118,7 @@ module.exports = {
     Category,
     CategoryFilter,
     CategoryMapping,
+    Expense,
     Feedback,
     ImportSource,
     Order,
