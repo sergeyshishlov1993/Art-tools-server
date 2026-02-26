@@ -72,10 +72,7 @@ router.get('/summary', async (req, res) => {
 
         const byTypeMap = {};
         for (const row of byType) {
-            byTypeMap[row.type] = {
-                total: parseFloat(row.total) || 0,
-                count: parseInt(row.count) || 0,
-            };
+            byTypeMap[row.type] = parseFloat(row.total) || 0;
         }
 
         res.json({
