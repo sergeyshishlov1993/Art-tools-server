@@ -9,6 +9,7 @@ const AUTO_CATEGORY_DEFINITIONS = {
     'ak-prysoska': { name: 'Акумуляторні вакуумні та вібраційні присоски', parentId: 'accum-tool' },
     'ak-poliruvalna': { name: 'Акумуляторні полірувальні машини', parentId: 'accum-tool' },
     'akumulyatorni-likhtari': { name: 'Акумуляторні ліхтарі', parentId: 'accum-tool' },
+    'ak-adapter': { name: 'Адаптери для акумуляторів', parentId: 'accum-tool' },
     'ak-zaklepuvach': { name: 'Акумуляторні заклепувальні пістолети', parentId: 'accum-tool' },
     'ak-stepler': { name: 'Акумуляторні степлери та цвяхозабивачі', parentId: 'accum-tool' },
     'ak-pistolet-hermetyk': { name: 'Акумуляторні пістолети для герметика', parentId: 'accum-tool' },
@@ -65,6 +66,7 @@ const LEARNED_MAPPING_RULES = [
     { keywords: ['акумуляторн', 'фрезер'], target: 'st-frezer', priority: 190 },
     { keywords: ['акумуляторн', 'рубанок'], target: 'st-rubanok', priority: 190 },
     { keywords: ['акумуляторн', 'вирубн', 'ножиц'], target: 'st-rubanok', priority: 190 },
+    { keywords: ['акумуляторн', 'висічн', 'ножиц'], target: 'st-rubanok', priority: 190 },
     { keywords: ['акумуляторн', 'паяльник'], target: 'el-payalnik', priority: 190 },
     { keywords: ['акумуляторн', 'гравіювальн'], target: 'el-graver', priority: 190 },
     { keywords: ['акумуляторн', 'міні-інструмент', '3 в 1'], target: 'el-graver', priority: 190 },
@@ -80,6 +82,19 @@ const LEARNED_MAPPING_RULES = [
     { keywords: ['кущоріз', 'ght 1700'], target: 'ak-kushchoriz', priority: 190 },
     { keywords: ['верстат', 'заточування', 'ланцюг'], target: 'st-tochylo', priority: 190 },
     { keywords: ['подовжувач', 'ep2.0r'], target: 'ak-inshe', priority: 190 },
+    { keywords: ['бензин', 'кос'], target: 'sad-motokosa', priority: 190 },
+    { keywords: ['зварювальн', 'др'], target: 'zv-material', priority: 190 },
+    { keywords: ['флюсов', 'зварювальн', 'др'], target: 'zv-material', priority: 195 },
+    { keywords: ['пильн', 'шин'], target: 'roz-sad', priority: 190 },
+    { keywords: ['кільцев', 'пил'], target: 'st-tortsovochna', priority: 190 },
+    { keywords: ['рубанок'], target: 'st-rubanok', priority: 180 },
+    { keywords: ['монтажн', 'пил'], target: 'st-tortsovochna', priority: 190 },
+    { keywords: ['відрізн', 'пил', 'метал'], target: 'st-tortsovochna', priority: 190 },
+    { keywords: ['полірувальн', 'губк'], target: 'roz-dysk', priority: 190 },
+    { keywords: ['адаптер', 'батаре'], target: 'ak-adapter', priority: 195 },
+    { keywords: ['портативн', 'зарядн', 'станц'], target: 'ak-batareya', priority: 190 },
+    { keywords: ['лазерн', 'нівелір'], target: 'bud-inshe', priority: 180 },
+    { keywords: ['адаптер', 'hex'], target: 'avto-instrument', priority: 180 },
 
     // Потенційні нові групи. Категорія створюється лише коли товарів > 5.
     { keywords: ['акумуляторн', 'заклепувальн'], target: 'ak-zaklepuvach', priority: 180 },
@@ -113,7 +128,19 @@ const LEARNED_CATEGORY_RULES = [
     { keywords: ['акумуляторн', 'фен'], target: 'ak-fen', priority: 190 },
     { keywords: ['акумуляторн', 'присоск'], target: 'ak-prysoska', priority: 190 },
     { keywords: ['акумуляторн', 'полірувальн'], target: 'ak-poliruvalna', priority: 190 },
-    { keywords: ['акумуляторн', 'ліхтар'], target: 'akumulyatorni-likhtari', priority: 190 }
+    { keywords: ['акумуляторн', 'ліхтар'], target: 'akumulyatorni-likhtari', priority: 190 },
+    { keywords: ['адаптер', 'акумулятор'], target: 'ak-adapter', priority: 195 },
+    { keywords: ['акумуляторн', 'пил'], target: 'akumulyatorni-pylky', priority: 180 },
+    { keywords: ['зварювальн', 'др'], target: 'zv-material', priority: 180 },
+    { keywords: ['шин', 'пил'], target: 'roz-sad', priority: 180 },
+    { keywords: ['бензин', 'кос'], target: 'sad-motokosa', priority: 180 },
+    { keywords: ['диск'], target: 'roz-dysk', priority: 170, exact: true },
+    { keywords: ['кільцеріз'], target: 'st-tortsovochna', priority: 180 },
+    { keywords: ['рубанк'], target: 'st-rubanok', priority: 180 },
+    { keywords: ['монтажн', 'пил'], target: 'st-tortsovochna', priority: 180 },
+    { keywords: ['полірувальн', 'круг'], target: 'roz-dysk', priority: 180 },
+    { keywords: ['портативн', 'зарядн', 'станц'], target: 'ak-batareya', priority: 180 },
+    { keywords: ['вимірювальн', 'інструмент'], target: 'bud-inshe', priority: 170 }
 ];
 
 const MAPPING_RULES = [
@@ -669,13 +696,15 @@ async function ensureSuggestedCategories(products, minimumProducts = 6) {
 }
 
 async function reconcileFallbackProducts(supplierPrefix, fallbackCategoryId = 'ak-inshe') {
+    const where = {
+        sub_category_id: fallbackCategoryId,
+        is_manual_category: false
+    };
+    if (supplierPrefix) where.supplier_prefix = supplierPrefix;
+
     const products = await Product.findAll({
         attributes: ['product_id', 'product_name', 'sub_category_id'],
-        where: {
-            supplier_prefix: supplierPrefix,
-            sub_category_id: fallbackCategoryId,
-            is_manual_category: false
-        }
+        where
     });
 
     const candidates = [];

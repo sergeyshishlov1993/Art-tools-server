@@ -507,17 +507,12 @@ class ImportService {
                 const preserveManualCategory = Boolean(
                     existingProduct?.is_manual_category && existingProduct?.sub_category_id
                 );
-                const preserveVerifiedCategory = Boolean(
-                    existingProduct?.sub_category_id &&
-                    (preserveManualCategory || existingProduct.sub_category_id !== 'ak-inshe')
-                );
-
-                if (preserveVerifiedCategory) {
+                if (preserveManualCategory) {
                     internalCategoryId = existingProduct.sub_category_id;
-                } else if (categoryId) {
+                } else {
                     internalCategoryId = await getInternalCategoryForProduct(
                         supplierPrefix,
-                        String(categoryId),
+                        String(categoryId || ''),
                         String(hasName)
                     );
                 }

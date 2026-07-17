@@ -24,6 +24,13 @@ const productCases = [
     ['Акумуляторний паяльник Procraft PL20', 'el-payalnik'],
     ['Драбина-стрем\'янка алюмінієва Procraft PLA2.128', 'bud-drabyna'],
     ['Алмазний диск Procraft DC125 125мм', 'roz-dysk'],
+    ['Коса бензинова Procraft T4200 PRO NEW', 'sad-motokosa'],
+    ['Флюсовий зварювальний дріт Procraft FW81 0.8 мм 1 кг', 'zv-material'],
+    ['Пильна шина Procraft 24 см', 'roz-sad'],
+    ['Адаптер PROFI-TEC BS20PT, з батареї Bosch на інструмент PROFI-TEC', 'ak-adapter'],
+    ['Портативна зарядна станція PROFI-TEC PPS2500 LiFePO₄', 'ak-batareya'],
+    ['Лазерний нівелір PROFI-TEC PGL 4D 1640', 'bud-inshe'],
+    ['Акумуляторні висічні ножиці по металу PROFI-TEC PCN20BL', 'st-rubanok'],
     ['Подовжувач телескопічний Procraft EP2.0R', 'ak-inshe']
 ];
 
@@ -54,6 +61,9 @@ test('maps supplier category names to split saw categories', () => {
     assert.equal(findBestMapping('Акумуляторні шабельні пили').target, 'ak-pyla-shabelna');
     assert.equal(findBestMapping('Акумуляторні ланцюгові пили').target, 'akumulyatorni-pylky');
     assert.equal(findBestMapping('Акумуляторні лобзики').target, 'ak-lobzyk');
+    assert.equal(findBestMapping('Адаптери для акумуляторів').target, 'ak-adapter');
+    assert.equal(findBestMapping('Зварювальні дроти').target, 'zv-material');
+    assert.equal(findBestMapping('Коси бензинові').target, 'sad-motokosa');
 });
 
 test('normalizes common supplier spelling mistakes in battery categories', () => {

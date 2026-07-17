@@ -1,7 +1,9 @@
 'use strict';
 
 module.exports = {
-    async up(queryInterface) {
+    async up(queryInterface, context = {}) {
+        const options = context?.transaction ? { transaction: context.transaction } : {};
+
         await queryInterface.bulkInsert('category', [
             { id: 'accum-tool', category_name: 'Акумуляторний інструмент', icon: 'i-mdi-battery-charging-wireless' },
             { id: 'electro-tool', category_name: 'Електроінструмент', icon: 'i-mdi-power-plug' },
@@ -10,7 +12,7 @@ module.exports = {
             { id: 'sad-gorod', category_name: 'Садова техніка', icon: 'i-mdi-flower' },
             { id: 'budivnytstvo', category_name: 'Будівельне обладнання', icon: 'i-mdi-crane' },
             { id: 'avto-rashodnik', category_name: 'Автотовари та розхідні матеріали', icon: 'i-mdi-car-wrench' }
-        ], {});
+        ], options);
 
         await queryInterface.bulkInsert('sub_category', [
             { sub_category_id: 'ak-shurupovert', sub_category_name: 'Акумуляторні шуруповерти', parent_id: 'accum-tool' },
@@ -37,6 +39,7 @@ module.exports = {
             { sub_category_id: 'akumulyatorni-likhtari', sub_category_name: 'Акумуляторні ліхтарі', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-sekator', sub_category_name: 'Акумуляторні секатори', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-batareya', sub_category_name: 'Акумулятори та зарядні пристрої', parent_id: 'accum-tool' },
+            { sub_category_id: 'ak-adapter', sub_category_name: 'Адаптери для акумуляторів', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-nabory', sub_category_name: 'Набори акумуляторного інструменту', parent_id: 'accum-tool' },
             { sub_category_id: 'ak-inshe', sub_category_name: 'Інший акумуляторний інструмент', parent_id: 'accum-tool' },
 
@@ -93,11 +96,12 @@ module.exports = {
             { sub_category_id: 'roz-sverdlo', sub_category_name: 'Свердла, біти, бури', parent_id: 'avto-rashodnik' },
             { sub_category_id: 'roz-sad', sub_category_name: 'Розхідні матеріали для саду (волосінь, ланцюги, мастила)', parent_id: 'avto-rashodnik' },
             { sub_category_id: 'avto-inshe', sub_category_name: 'Інші автотовари та розхідні матеріали', parent_id: 'avto-rashodnik' }
-        ], {});
+        ], options);
     },
 
-    async down(queryInterface) {
-        await queryInterface.bulkDelete('sub_category', null, {});
-        await queryInterface.bulkDelete('category', null, {});
+    async down(queryInterface, context = {}) {
+        const options = context?.transaction ? { transaction: context.transaction } : {};
+        await queryInterface.bulkDelete('sub_category', null, options);
+        await queryInterface.bulkDelete('category', null, options);
     }
 };

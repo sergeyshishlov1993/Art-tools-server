@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "catalog:rebuild": "node scripts/rebuild-catalog.js",
     "test": "node --test test/*.test.js",
     "start": "nodemon --inspect src/index.js"
   },

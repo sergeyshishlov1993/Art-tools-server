@@ -20,7 +20,7 @@ module.exports = function (sequelize) {
       },
 
       pictures_name: {
-        type: DataTypes.STRING(255),
+        type: DataTypes.TEXT,
       },
     },
     {

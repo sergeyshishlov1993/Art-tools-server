@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
 const ImportService = require('../../services/importService');
+const { rebuildCatalogue } = require('../../services/catalogRebuildService');
 const {
     getMappingsForSupplier,
     updateMapping,
@@ -561,6 +562,25 @@ router.post('/run-all', async (req, res) => {
             results
         });
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST /api/admin/import/rebuild-catalogue
+// Повністю видаляє старий каталог і збирає його заново з активних джерел.
+router.post('/rebuild-catalogue', async (req, res) => {
+    try {
+        if (req.body?.confirm !== 'DELETE_AND_REBUILD_CATALOG') {
+            return res.status(400).json({
+                success: false,
+                error: 'Confirmation required: DELETE_AND_REBUILD_CATALOG'
+            });
+        }
+
+        const result = await rebuildCatalogue({ sourcesDir: SOURCES_DIR });
+        res.status(result.success ? 200 : 500).json(result);
+    } catch (error) {
+        console.error('Catalogue rebuild error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
