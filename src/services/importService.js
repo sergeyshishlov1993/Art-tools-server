@@ -3,7 +3,12 @@ const fs = require('fs');
 const xml2js = require('xml2js');
 const { Op } = require('sequelize');
 const { Product, Parameter, Picture, ImportSource } = require('../db');
-const { mapCategoriesFromXML, getInternalCategoryForProduct } = require('./autoMappingService');
+const {
+    mapCategoriesFromXML,
+    getInternalCategoryForProduct,
+    ensureSuggestedCategories,
+    reconcileFallbackProducts
+} = require('./autoMappingService');
 const FilterService = require('./filterService');
 const { generateSlug, generateFilterSlug } = require('../utils/slugify');
 const { parseDescriptionSpecs } = require('./parsers/descriptionSpecsParser');
@@ -379,7 +384,9 @@ class ImportService {
 
         console.log(`📦 Знайдено товарів: ${rawProducts.length}`);
 
+        const createdCategories = await ensureSuggestedCategories(rawProducts, 6);
         const importStats = await this._importProducts(rawProducts, supplierPrefix);
+        const fallbackAudit = await reconcileFallbackProducts(supplierPrefix);
 
         const affectedCategories = await this._getAffectedCategories(supplierPrefix);
         for (const catId of affectedCategories) {
@@ -396,6 +403,8 @@ class ImportService {
                 unmappedList: mappingResult.unmapped || []
             },
             products: importStats,
+            categoryCreation: createdCategories,
+            fallbackAudit,
             filtersUpdated: affectedCategories.length
         };
     }
@@ -489,17 +498,39 @@ class ImportService {
                 const hasName = offer?.name || offer?.model || offer?.title;
                 if (!hasName) { stats.skipped++; continue; }
 
+                const productId = `${supplierPrefix}_${externalId}`;
+                const existingProduct = await Product.findByPk(productId, {
+                    attributes: ['sub_category_id', 'is_manual_category']
+                });
+
                 let internalCategoryId = null;
-                if (categoryId) {
-                    internalCategoryId = await getInternalCategoryForProduct(supplierPrefix, String(categoryId));
+                const preserveManualCategory = Boolean(
+                    existingProduct?.is_manual_category && existingProduct?.sub_category_id
+                );
+                const preserveVerifiedCategory = Boolean(
+                    existingProduct?.sub_category_id &&
+                    (preserveManualCategory || existingProduct.sub_category_id !== 'ak-inshe')
+                );
+
+                if (preserveVerifiedCategory) {
+                    internalCategoryId = existingProduct.sub_category_id;
+                } else if (categoryId) {
+                    internalCategoryId = await getInternalCategoryForProduct(
+                        supplierPrefix,
+                        String(categoryId),
+                        String(hasName)
+                    );
                 }
 
                 if (!internalCategoryId) { stats.skipped++; continue; }
 
                 const productData = this._parseProduct(offer, supplierPrefix, internalCategoryId);
-                const productId = `${supplierPrefix}_${externalId}`;
 
-                const [, created] = await Product.upsert({ product_id: productId, ...productData });
+                const [, created] = await Product.upsert({
+                    product_id: productId,
+                    ...productData,
+                    is_manual_category: preserveManualCategory
+                });
 
                 if (created) stats.created++;
                 else stats.updated++;

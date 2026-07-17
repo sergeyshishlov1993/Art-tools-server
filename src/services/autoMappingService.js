@@ -1,7 +1,123 @@
 const { Product, SubCategory, CategoryMapping } = require('../db');
 const { Op } = require('sequelize');
 
+const AUTO_CATEGORY_DEFINITIONS = {
+    'akumulyatorni-pylky': { name: 'Акумуляторні пилки', parentId: 'accum-tool' },
+    'ak-pyla-dyskova': { name: 'Акумуляторні дискові пили', parentId: 'accum-tool' },
+    'ak-pyla-shabelna': { name: 'Акумуляторні шабельні пили', parentId: 'accum-tool' },
+    'ak-fen': { name: 'Акумуляторні будівельні фени', parentId: 'accum-tool' },
+    'ak-prysoska': { name: 'Акумуляторні вакуумні та вібраційні присоски', parentId: 'accum-tool' },
+    'ak-poliruvalna': { name: 'Акумуляторні полірувальні машини', parentId: 'accum-tool' },
+    'akumulyatorni-likhtari': { name: 'Акумуляторні ліхтарі', parentId: 'accum-tool' },
+    'ak-zaklepuvach': { name: 'Акумуляторні заклепувальні пістолети', parentId: 'accum-tool' },
+    'ak-stepler': { name: 'Акумуляторні степлери та цвяхозабивачі', parentId: 'accum-tool' },
+    'ak-pistolet-hermetyk': { name: 'Акумуляторні пістолети для герметика', parentId: 'accum-tool' },
+    'ak-ventyliator': { name: 'Акумуляторні вентилятори', parentId: 'accum-tool' },
+    'ak-radio': { name: 'Акумуляторні радіоприймачі та колонки', parentId: 'accum-tool' },
+    'ak-zshyvach-mishkiv': { name: 'Акумуляторні машини для зшивання мішків', parentId: 'accum-tool' }
+};
+
+// Правила, вивчені з ручної розкладки каталогу. Вони мають вищий
+// пріоритет за загальні правила нижче.
+const LEARNED_MAPPING_RULES = [
+    // Витратні матеріали перевіряємо раніше за інструмент.
+    { keywords: ['алмазн', 'диск'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['диск', 'відрізн'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['диск', 'зачисн'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['диск', 'пелюстков'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['пиляльн', 'диск'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['пильн', 'диск'], target: 'roz-dysk', priority: 205 },
+    { keywords: ['алмазн', 'чашк'], target: 'roz-dysk', priority: 205 },
+
+    // Набори повинні залишатися наборами, навіть якщо у дужках перелічені АКБ/ЗП.
+    { keywords: ['набір', 'акумуляторн'], target: 'ak-nabory', priority: 225 },
+    { keywords: ['набір', 'садов', 'акумуляторн'], target: 'ak-nabory', priority: 226 },
+
+    // Окремі типи акумуляторних пил.
+    { keywords: ['акумуляторн', 'ланцюгов', 'пил'], target: 'akumulyatorni-pylky', priority: 220 },
+    { keywords: ['акумуляторн', 'міні', 'пил'], target: 'akumulyatorni-pylky', priority: 220 },
+    { keywords: ['акумуляторн', 'пил', 'pka'], target: 'akumulyatorni-pylky', priority: 219 },
+    { keywords: ['акумуляторн', 'пил', 'pca40/2'], target: 'akumulyatorni-pylky', priority: 219 },
+    { keywords: ['акумуляторн', 'дисков', 'пил'], target: 'ak-pyla-dyskova', priority: 196 },
+    { keywords: ['циркулярн', 'пил', 'акумуляторн'], target: 'ak-pyla-dyskova', priority: 196 },
+    { keywords: ['акумуляторн', 'шабельн', 'пил'], target: 'ak-pyla-shabelna', priority: 197 },
+    { keywords: ['шабельн', 'пил', 'grs'], target: 'ak-pyla-shabelna', priority: 197 },
+    { keywords: ['акумуляторн', 'лобзик'], target: 'ak-lobzyk', priority: 196 },
+    { keywords: ['лобзик', 'акумуляторн'], target: 'ak-lobzyk', priority: 196 },
+
+    // Категорії, підтверджені ручною розкладкою.
+    { keywords: ['акумуляторн', 'фарбопульт'], target: 'ak-farbopult', priority: 190 },
+    { keywords: ['аккумуляторн', 'краскопульт'], target: 'ak-farbopult', priority: 190 },
+    { keywords: ['фарбопульт', 'pse'], target: 'ak-farbopult', priority: 190 },
+    { keywords: ['акумуляторн', 'фен'], target: 'ak-fen', priority: 190 },
+    { keywords: ['акумуляторн', 'полірувальн'], target: 'ak-poliruvalna', priority: 190 },
+    { keywords: ['акумуляторн', 'ексцентрик', 'шліф'], target: 'ak-poliruvalna', priority: 190 },
+    { keywords: ['акумуляторн', 'ліхтар'], target: 'akumulyatorni-likhtari', priority: 190 },
+    { keywords: ['акумуляторн', 'прожектор'], target: 'akumulyatorni-likhtari', priority: 190 },
+    { keywords: ['світлодіодн', 'прожектор', 'акумулятор'], target: 'akumulyatorni-likhtari', priority: 190 },
+    { keywords: ['акумуляторн', 'віброприсоск'], target: 'ak-prysoska', priority: 190 },
+    { keywords: ['акумуляторн', 'вібраційн', 'присоск'], target: 'ak-prysoska', priority: 190 },
+    { keywords: ['акумуляторн', 'вібратор', 'бетон'], target: 'ak-prysoska', priority: 190 },
+    { keywords: ['акумуляторн', 'мультитул'], target: 'ak-renovator', priority: 190 },
+    { keywords: ['акумуляторн', 'реноватор'], target: 'ak-renovator', priority: 190 },
+    { keywords: ['акумуляторн', 'будівельн', 'міксер'], target: 'bud-betonomishalka', priority: 190 },
+    { keywords: ['міксер', 'будівельн', 'акумуляторн'], target: 'bud-betonomishalka', priority: 190 },
+    { keywords: ['акумуляторн', 'фрезер'], target: 'st-frezer', priority: 190 },
+    { keywords: ['акумуляторн', 'рубанок'], target: 'st-rubanok', priority: 190 },
+    { keywords: ['акумуляторн', 'вирубн', 'ножиц'], target: 'st-rubanok', priority: 190 },
+    { keywords: ['акумуляторн', 'паяльник'], target: 'el-payalnik', priority: 190 },
+    { keywords: ['акумуляторн', 'гравіювальн'], target: 'el-graver', priority: 190 },
+    { keywords: ['акумуляторн', 'міні-інструмент', '3 в 1'], target: 'el-graver', priority: 190 },
+    { keywords: ['акумуляторн', 'прям', 'шліфувальн'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 190 },
+    { keywords: ['акумуляторн', 'різак', 'арматур'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 190 },
+    { keywords: ['металоріз'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 190 },
+    { keywords: ['штроборіз'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 190 },
+    { keywords: ['драбина'], target: 'bud-drabyna', priority: 190 },
+    { keywords: ['стрем\'янк'], target: 'bud-drabyna', priority: 190 },
+    { keywords: ['обприскувач'], target: 'ak-opryskuvach', priority: 185 },
+    { keywords: ['шуруповерт', 'pa12'], target: 'ak-shurupovert', priority: 190 },
+    { keywords: ['телескопічн', 'подовжувач', 'gsp'], target: 'ak-sekator', priority: 190 },
+    { keywords: ['кущоріз', 'ght 1700'], target: 'ak-kushchoriz', priority: 190 },
+    { keywords: ['верстат', 'заточування', 'ланцюг'], target: 'st-tochylo', priority: 190 },
+    { keywords: ['подовжувач', 'ep2.0r'], target: 'ak-inshe', priority: 190 },
+
+    // Потенційні нові групи. Категорія створюється лише коли товарів > 5.
+    { keywords: ['акумуляторн', 'заклепувальн'], target: 'ak-zaklepuvach', priority: 180 },
+    { keywords: ['акумуляторн', 'цвяхозабивач'], target: 'ak-stepler', priority: 180 },
+    { keywords: ['акумуляторн', 'степлер'], target: 'ak-stepler', priority: 180 },
+    { keywords: ['акумуляторн', 'герметик'], target: 'ak-pistolet-hermetyk', priority: 180 },
+    { keywords: ['акумуляторн', 'вентилятор'], target: 'ak-ventyliator', priority: 180 },
+    { keywords: ['акумуляторн', 'радіоприймач'], target: 'ak-radio', priority: 180 },
+    { keywords: ['акумуляторн', 'bluetooth', 'колонк'], target: 'ak-radio', priority: 180 },
+    { keywords: ['акумуляторн', 'зшивання', 'мішк'], target: 'ak-zshyvach-mishkiv', priority: 180 }
+];
+
+// Окремий набір для назв категорій постачальника. Тут немає правил на кшталт
+// «будь-який фарбопульт», які без контексту могли б зачепити пневмоінструмент.
+const LEARNED_CATEGORY_RULES = [
+    { keywords: ['акумуляторні пилки'], target: 'akumulyatorni-pylky', priority: 210, exact: true },
+    { keywords: ['акумуляторн', 'ланцюгов', 'пил'], target: 'akumulyatorni-pylky', priority: 200 },
+    { keywords: ['акумуляторн', 'міні', 'пил'], target: 'akumulyatorni-pylky', priority: 200 },
+    { keywords: ['акумуляторн', 'дисков', 'пил'], target: 'ak-pyla-dyskova', priority: 200 },
+    { keywords: ['акумуляторн', 'шабельн', 'пил'], target: 'ak-pyla-shabelna', priority: 200 },
+    { keywords: ['акумуляторн', 'лобзик'], target: 'ak-lobzyk', priority: 200 },
+    { keywords: ['акумуляторн', 'секатор'], target: 'ak-sekator', priority: 190 },
+    { keywords: ['акумуляторн', 'тример'], target: 'ak-trymer', priority: 190 },
+    { keywords: ['акумуляторн', 'кос'], target: 'ak-trymer', priority: 190 },
+    { keywords: ['акумуляторн', 'кущоріз'], target: 'ak-kushchoriz', priority: 190 },
+    { keywords: ['акумуляторн', 'газонокосарк'], target: 'ak-gazonokosarka', priority: 190 },
+    { keywords: ['акумуляторн', 'обприскувач'], target: 'ak-opryskuvach', priority: 190 },
+    { keywords: ['акумуляторн', 'повітродув'], target: 'ak-povitroduvka', priority: 190 },
+    { keywords: ['акумуляторн', 'пилосос'], target: 'ak-pylosos', priority: 190 },
+    { keywords: ['акумуляторн', 'фарбопульт'], target: 'ak-farbopult', priority: 190 },
+    { keywords: ['акумуляторн', 'фен'], target: 'ak-fen', priority: 190 },
+    { keywords: ['акумуляторн', 'присоск'], target: 'ak-prysoska', priority: 190 },
+    { keywords: ['акумуляторн', 'полірувальн'], target: 'ak-poliruvalna', priority: 190 },
+    { keywords: ['акумуляторн', 'ліхтар'], target: 'akumulyatorni-likhtari', priority: 190 }
+];
+
 const MAPPING_RULES = [
+    ...LEARNED_CATEGORY_RULES,
     // ============================================
     // === НАБОРИ (НАЙВИЩИЙ ПРІОРИТЕТ) ===
     // ============================================
@@ -179,12 +295,12 @@ const MAPPING_RULES = [
     // === ЕЛЕКТРОІНСТРУМЕНТ ===
     // ============================================
     { keywords: ['перфоратор'], target: 'el-perforator', priority: 80 },
-    { keywords: ['кутошліфувальн'], target: 'el-bolgarka', priority: 80 },
-    { keywords: ['болгарк'], target: 'el-bolgarka', priority: 80 },
-    { keywords: ['ушм'], target: 'el-bolgarka', priority: 75 },
-    { keywords: ['углов', 'шлифмашин'], target: 'el-bolgarka', priority: 80 },
-    { keywords: ['металоріз'], target: 'el-bolgarka', priority: 80 },
-    { keywords: ['штроборіз'], target: 'el-bolgarka', priority: 80 },
+    { keywords: ['кутошліфувальн'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 80 },
+    { keywords: ['болгарк'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 80 },
+    { keywords: ['ушм'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 75 },
+    { keywords: ['углов', 'шлифмашин'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 80 },
+    { keywords: ['металоріз'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 80 },
+    { keywords: ['штроборіз'], target: 'electro-tool-kutoshlifuvalni-mashyny', priority: 80 },
     { keywords: ['дрил'], target: 'el-drel', priority: 80 },
     { keywords: ['дрель'], target: 'el-drel', priority: 80 },
     { keywords: ['шуруповерт'], target: 'el-drel', priority: 75 },
@@ -421,6 +537,7 @@ function normalizeText(text) {
     return text
         .toLowerCase()
         .replace(/[''`ʼ]/g, "'")
+        .replace(/ак+у?м+ц?у?лятор/g, 'акумулятор')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -450,7 +567,7 @@ function matchesAllKeywords(text, keywords) {
     return keywords.every(kw => normalized.includes(kw.toLowerCase()));
 }
 
-function findBestMapping(textToMatch, parentCategoryName = null) {
+function findBestMappingUsingRules(textToMatch, parentCategoryName, rules) {
     const normalized = normalizeText(textToMatch);
 
     const fullContext = parentCategoryName
@@ -460,7 +577,7 @@ function findBestMapping(textToMatch, parentCategoryName = null) {
     let bestMatch = null;
     let bestPriority = 0;
 
-    for (const rule of MAPPING_RULES) {
+    for (const rule of rules) {
         if (rule.exact && normalized === rule.keywords[0].toLowerCase()) {
             if (rule.priority > bestPriority) {
                 bestMatch = rule;
@@ -499,9 +616,98 @@ function findBestMapping(textToMatch, parentCategoryName = null) {
     return { target: null, confidence: 0, reason: 'no_match' };
 }
 
+function findBestMapping(textToMatch, parentCategoryName = null) {
+    return findBestMappingUsingRules(textToMatch, parentCategoryName, MAPPING_RULES);
+}
+
 // Нова функція для категоризації по назві товару
 function findCategoryByProductName(productName) {
-    return findBestMapping(productName, null);
+    // Комплектація в дужках часто містить слова «акумулятор» і «зарядний
+    // пристрій», які не описують тип самого товару.
+    const title = String(productName || '').split(/[([]/, 1)[0].trim();
+    const normalizedTitle = normalizeText(title || productName);
+
+    // Назва витратника може містити повну назву сумісного інструмента.
+    if (['ланцюг ', 'цепь ', 'шина '].some(prefix => normalizedTitle.startsWith(prefix))) {
+        return { target: 'roz-sad', confidence: 230, keywords: ['тип товару: витратник'] };
+    }
+
+    // Для назви товару використовуємо лише перевірені правила. Загальні
+    // правила призначені для назв категорій постачальника і занадто широкі
+    // для окремих товарів (наприклад, «пилосос» містить «пил»).
+    return findBestMappingUsingRules(title || productName, null, LEARNED_MAPPING_RULES);
+}
+
+async function ensureSuggestedCategories(products, minimumProducts = 6) {
+    const counts = new Map();
+
+    for (const product of products || []) {
+        const productName = product?.name || product?.model || product?.title || '';
+        const mapping = findCategoryByProductName(productName);
+        if (!mapping.target || !AUTO_CATEGORY_DEFINITIONS[mapping.target]) continue;
+        counts.set(mapping.target, (counts.get(mapping.target) || 0) + 1);
+    }
+
+    const created = [];
+    for (const [categoryId, count] of counts.entries()) {
+        if (count < minimumProducts) continue;
+        const definition = AUTO_CATEGORY_DEFINITIONS[categoryId];
+        const [, wasCreated] = await SubCategory.findOrCreate({
+            where: { sub_category_id: categoryId },
+            defaults: {
+                sub_category_id: categoryId,
+                sub_category_name: definition.name,
+                parent_id: definition.parentId,
+                pictures: null
+            }
+        });
+
+        if (wasCreated) created.push({ categoryId, count, name: definition.name });
+    }
+
+    return created;
+}
+
+async function reconcileFallbackProducts(supplierPrefix, fallbackCategoryId = 'ak-inshe') {
+    const products = await Product.findAll({
+        attributes: ['product_id', 'product_name', 'sub_category_id'],
+        where: {
+            supplier_prefix: supplierPrefix,
+            sub_category_id: fallbackCategoryId,
+            is_manual_category: false
+        }
+    });
+
+    const candidates = [];
+    for (const product of products) {
+        const mapping = findCategoryByProductName(product.product_name);
+        if (!mapping.target || mapping.target === fallbackCategoryId || mapping.confidence < 80) continue;
+        candidates.push({ product, mapping });
+    }
+
+    const createdCategories = await ensureSuggestedCategories(
+        candidates.map(({ product }) => ({ name: product.product_name })),
+        6
+    );
+    const existingTargets = new Map();
+    const movedByCategory = {};
+
+    for (const { product, mapping } of candidates) {
+        if (!existingTargets.has(mapping.target)) {
+            existingTargets.set(mapping.target, Boolean(await SubCategory.findByPk(mapping.target)));
+        }
+        if (!existingTargets.get(mapping.target)) continue;
+
+        await product.update({ sub_category_id: mapping.target });
+        movedByCategory[mapping.target] = (movedByCategory[mapping.target] || 0) + 1;
+    }
+
+    return {
+        checked: products.length,
+        moved: Object.values(movedByCategory).reduce((sum, count) => sum + count, 0),
+        movedByCategory,
+        createdCategories
+    };
 }
 
 async function getOrCreateMapping(supplierPrefix, externalCategoryId, categoryName, parentCategoryName = null) {
@@ -698,11 +904,13 @@ module.exports = {
     getOrCreateMapping,
     mapCategoriesFromXML,
     getInternalCategoryForProduct,
+    ensureSuggestedCategories,
+    reconcileFallbackProducts,
     getMappingsForSupplier,
     clearMappingsForSupplier,
     updateMapping,
     MAPPING_RULES,
+    AUTO_CATEGORY_DEFINITIONS,
     IGNORE_CATEGORIES,
     normalizeText
 };
-
